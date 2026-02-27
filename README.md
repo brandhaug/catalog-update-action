@@ -110,7 +110,9 @@ Groups are evaluated in order — first match wins. A common pattern is to have 
 }
 ```
 
-Packages not matched by any group get individual PRs. Specific groups that contain only patch updates are automatically collapsed into `all-patch-updates` to reduce PR noise.
+Packages not matched by any group get individual PRs.
+
+**Patch collapse:** If a named group (e.g. `sentry`) contains only patch updates and no minor or major updates, its members are automatically moved into `all-patch-updates` instead of getting a separate PR. This reduces PR noise — a dedicated group PR is only created when it has at least one minor or major update. For this to work, you need an `all-patch-updates` catch-all group with `"updateTypes": ["patch"]` as the last group.
 
 ### Ignore Rules
 
