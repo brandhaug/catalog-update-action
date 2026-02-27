@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "catalog-update-action configuration",
+  "description": "Configuration for the catalog-update-action GitHub Action",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Path or URL to the JSON schema"
+    },
+    "branchPrefix": {
+      "type": "string",
+      "default": "catalog-update",
+      "description": "Prefix for PR branches (e.g., catalog-update/react)"
+    },
+    "defaultBranch": {
+      "type": "string",
+      "default": "master",
+      "description": "Base branch for PRs"
+    },
+    "maxOpenPrs": {
+      "type": "integer",
+      "default": 20,
+      "minimum": 1,
+      "description": "Maximum number of open PRs at any time"
+    },
+    "concurrency": {
+      "type": "integer",
+      "default": 10,
+      "minimum": 1,
+      "description": "Max concurrent npm registry requests"
+    },
+    "packageManager": {
+      "type": "string",
+      "enum": ["bun", "npm", "pnpm", "yarn"],
+      "default": "bun",
+      "description": "Package manager used for lockfile updates"
+    },
+    "groups": {
+      "type": "array",
+      "default": [],
+      "description": "Dependency grouping rules. Evaluated in order — first match wins.",
+      "items": {
+        "type": "object",
+        "required": ["name", "patterns"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Group identifier, used in branch names and PR titles"
+          },
+          "patterns": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "Glob patterns to match package names (* wildcard supported)"
+          },
+          "updateTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["major", "minor", "patch"]
+            },
+            "minItems": 1,
+            "description": "Restrict to specific semver change types. Omit to match all types."
+          }
+        }
+      }
+    },
+    "ignore": {
+      "type": "array",
+      "default": [],
+      "description": "Rules to ignore specific dependency updates",
+      "items": {
+        "type": "object",
+        "required": ["pattern"],
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Glob pattern to match package names"
+          },
+          "updateTypes": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["major", "minor", "patch"]
+            },
+            "minItems": 1,
+            "description": "Only ignore specific change types. Omit to ignore all updates for matched packages."
+          }
+        }
+      }
+    }
+  }
+}
