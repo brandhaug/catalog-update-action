@@ -180,7 +180,13 @@ async function main(): Promise<void> {
     }
   }
 
+  const failed = prsToCreate - created
   console.log(`\nDone! Created ${created}/${prsToCreate} PRs, rebuilt ${rebuiltPrCount} existing PRs.`)
+
+  if (failed > 0) {
+    console.error(`\n${failed} PR(s) failed to create.`)
+    process.exit(1)
+  }
 }
 
 main().catch((error) => {

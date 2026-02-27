@@ -330,6 +330,10 @@ export async function createGroupPr({
     console.log(`  PR created: ${prResult.stdout}`)
   } else {
     console.error(`  Failed to create PR for group "${groupName}"`)
+    if (prResult.stderr?.includes('not permitted to create or approve pull requests')) {
+      console.error('  Enable "Allow GitHub Actions to create and approve pull requests" in repository Settings > Actions > General > Workflow permissions.')
+      console.error('  If the checkbox is disabled, an organization admin must first enable it in Organization Settings > Actions > General > Workflow permissions.')
+    }
   }
 
   return prResult.exitCode === 0
