@@ -12,9 +12,17 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Configure git identity
+      shell: bash
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
     - name: Setup Bun
       uses: oven-sh/setup-bun@v2
 
     - name: Run catalog updater
       shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: bun ${{ github.action_path }}/src/main.ts --config "${{ inputs.config }}" ${{ inputs.dry-run == 'true' && '--dry-run' || '' }}
