@@ -1,0 +1,13 @@
+{
+  "branchPrefix": "catalog-update",
+  "defaultBranch": "master",
+  "maxOpenPrs": 20,
+  "concurrency": 10,
+  "packageManager": "bun",
+  "groups": [
+    { "name": "react", "patterns": ["react", "react-dom"] },
+    { "name": "vite", "patterns": ["vite", "vitest", "@vitejs/*", "@vitest/*"] },
+    { "name": "all-patch-updates", "patterns": ["*"], "updateTypes": ["patch"] }
+  ],
+  "ignore": []
+}

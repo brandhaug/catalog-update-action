@@ -1,0 +1,17 @@
+{
+  "name": "catalog-update-action",
+  "version": "0.1.0",
+  "description": "Automated dependency updates for Bun catalog: protocol",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "bun src/main.ts",
+    "dry-run": "bun src/main.ts --dry-run",
+    "test": "bun test",
+    "check": "bun x --bun tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "@types/bun": "^1.2.0"
+  }
+}

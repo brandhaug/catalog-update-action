@@ -1,0 +1,22 @@
+name: 'Catalog Dependency Updater'
+description: 'Automated dependency updates for Bun catalog: protocol. Replaces Dependabot for monorepos using Bun workspaces with centralized catalogs.'
+
+inputs:
+  config:
+    description: 'Path to .catalog-updaterc.json config file'
+    default: '.catalog-updaterc.json'
+  dry-run:
+    description: 'Preview updates without creating PRs'
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@v2
+
+    - name: Run catalog updater
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+      run: bun ${{ github.action_path }}/src/main.ts --config "${{ inputs.config }}" ${{ inputs.dry-run == 'true' && '--dry-run' || '' }}
