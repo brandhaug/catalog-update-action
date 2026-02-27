@@ -36,7 +36,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: your-org/catalog-update-action@v1
+      - uses: brandhaug/catalog-update-action@v1
         with:
           config: '.catalog-updaterc.json'
           dry-run: 'false'
