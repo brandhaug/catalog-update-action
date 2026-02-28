@@ -12,6 +12,10 @@ inputs:
     description: 'GitHub token for creating PRs. Defaults to github.token. Use a PAT or GitHub App token to trigger downstream workflows.'
     default: ''
 
+branding:
+  icon: 'package'
+  color: 'orange'
+
 runs:
   using: 'composite'
   steps:

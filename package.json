@@ -3,6 +3,24 @@
   "version": "0.1.1",
   "description": "Automated dependency updates for Bun catalog: protocol",
   "license": "MIT",
+  "author": "brandhaug",
+  "homepage": "https://github.com/brandhaug/catalog-update-action#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brandhaug/catalog-update-action.git"
+  },
+  "bugs": {
+    "url": "https://github.com/brandhaug/catalog-update-action/issues"
+  },
+  "keywords": [
+    "bun",
+    "catalog",
+    "dependabot",
+    "dependency-updates",
+    "github-action",
+    "monorepo",
+    "workspaces"
+  ],
   "type": "module",
   "bin": {
     "catalog-update": "src/main.ts"
