@@ -1,5 +1,5 @@
 name: 'Catalog Dependency Updater'
-description: 'Automated dependency updates for Bun catalog: protocol. Replaces Dependabot for monorepos using Bun workspaces with centralized catalogs.'
+description: 'Automated dependency updates for Bun catalog: protocol. Replaces Dependabot for Bun workspaces.'
 
 inputs:
   config:
