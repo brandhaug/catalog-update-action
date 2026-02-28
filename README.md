@@ -2,15 +2,28 @@
 
 Automated dependency updates for Bun's `catalog:` protocol. Replaces Dependabot for monorepos using [Bun workspaces](https://bun.sh/docs/install/workspaces) with a centralized [catalog](https://bun.sh/docs/install/workspaces#versioning).
 
+[![npm version](https://img.shields.io/npm/v/catalog-update-action)](https://www.npmjs.com/package/catalog-update-action)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 ## Why
 
-Dependabot doesn't understand Bun's `catalog:` protocol — it can't update the centralized version catalog in your root `package.json`. This action fills that gap by:
+Dependabot doesn't understand Bun's `catalog:` protocol — it can't update the centralized version catalog in your root `package.json`. This action fills that gap.
 
-- Reading the `catalog` field from your root `package.json`
-- Querying npm for the latest stable versions
-- Grouping updates based on configurable patterns (similar to Dependabot groups)
-- Creating and syncing PRs via the GitHub CLI
-- Including release notes from GitHub Releases in PR descriptions
+### Features
+
+- Reads the `catalog` field from your root `package.json`
+- Queries npm for the latest stable versions (skips pre-releases)
+- Groups updates into batches based on configurable patterns (similar to Dependabot groups)
+- Creates and syncs PRs via the GitHub CLI — closes stale ones, rebuilds conflicting ones
+- Includes release notes from GitHub Releases in PR descriptions
+- Supports `^` ranges and `npm:` aliases
+- Runs as a GitHub Action or standalone CLI
+
+## Prerequisites
+
+- [Bun](https://bun.sh) runtime
+- `gh` CLI (pre-installed on GitHub Actions runners)
+- `GITHUB_TOKEN` with `contents: write` and `pull-requests: write` permissions
 
 ## Usage
 
@@ -42,6 +55,34 @@ jobs:
           dry-run: 'false'
 ```
 
+> **Tip:** PRs created with the default `GITHUB_TOKEN` won't trigger downstream workflows (e.g., CI checks). To fix this, use a GitHub App token:
+>
+> ```yaml
+> steps:
+>   - uses: actions/create-github-app-token@v1
+>     id: app-token
+>     with:
+>       app-id: ${{ secrets.APP_ID }}
+>       private-key: ${{ secrets.APP_PRIVATE_KEY }}
+>
+>   - uses: actions/checkout@v4
+>     with:
+>       fetch-depth: 0
+>       token: ${{ steps.app-token.outputs.token }}
+>
+>   - uses: brandhaug/catalog-update-action@v1
+>     with:
+>       token: ${{ steps.app-token.outputs.token }}
+> ```
+
+#### Action Inputs
+
+| Input | Default | Description |
+| --- | --- | --- |
+| `config` | `.catalog-updaterc.json` | Path to the config file |
+| `dry-run` | `false` | Preview updates without creating PRs |
+| `token` | `github.token` | GitHub token for creating PRs. Use a PAT or GitHub App token to trigger downstream workflows |
+
 ### CLI
 
 ```bash
@@ -60,9 +101,6 @@ catalog-update
 
 # Custom config path
 catalog-update -c path/to/.catalog-updaterc.json
-
-# Show help
-catalog-update --help
 ```
 
 #### CLI Options
@@ -80,6 +118,7 @@ Create a `.catalog-updaterc.json` in your repository root:
 
 ```json
 {
+  "$schema": "https://raw.githubusercontent.com/brandhaug/catalog-update-action/master/schema.json",
   "branchPrefix": "catalog-update",
   "defaultBranch": "master",
   "maxOpenPrs": 20,
@@ -96,6 +135,8 @@ Create a `.catalog-updaterc.json` in your repository root:
   ]
 }
 ```
+
+> **Tip:** Add the `$schema` field to get autocomplete and validation in your IDE.
 
 ### Options
 
@@ -162,19 +203,17 @@ Each PR includes:
 - A table of all updated packages with version changes
 - Release notes fetched from GitHub Releases (with intermediate version support for monorepos)
 
-## Action Inputs
+## Contributing
 
-| Input | Default | Description |
-| --- | --- | --- |
-| `config` | `.catalog-updaterc.json` | Path to the config file |
-| `dry-run` | `false` | Preview updates without creating PRs |
+Contributions are welcome! To get started:
 
-## Requirements
-
-- [Bun](https://bun.sh) runtime
-- `gh` CLI (pre-installed on GitHub Actions runners)
-- `GITHUB_TOKEN` with `contents: write` and `pull-requests: write` permissions
+```bash
+git clone https://github.com/brandhaug/catalog-update-action.git
+cd catalog-update-action
+bun install
+bun test
+```
 
 ## License
 
-MIT
+MIT — see [`LICENSE`](LICENSE) for details.

@@ -3,7 +3,7 @@ import { loadConfig } from './config'
 import { parseCatalog } from './catalog'
 import { queryNpmRegistry, queryPackageMetadata, queryReleaseNotes } from './registry'
 import { shouldIgnore, assignToGroups } from './groups'
-import { getExistingPrs, syncExistingPrs, createGroupPr } from './git'
+import { exec, getExistingPrs, syncExistingPrs, createGroupPr } from './git'
 import { classifySemverChange, Semaphore } from './utils'
 import type { UpdateCandidate } from './types'
 
@@ -77,6 +77,14 @@ async function main(): Promise<void> {
   console.log(`Mode: ${dryRun ? 'DRY RUN' : 'LIVE'}`)
   console.log(`Config: ${configPath}`)
   console.log('')
+
+  // 0. Fetch latest remote refs (needed for branch comparisons and checkouts)
+  console.log('0. Fetching latest remote refs...')
+  const fetchResult = await exec({ command: ['git', 'fetch', 'origin'], cwd })
+  if (fetchResult.exitCode !== 0) {
+    console.error('Failed to fetch from origin')
+    process.exit(1)
+  }
 
   // 1. Load config
   console.log('1. Loading config...')
