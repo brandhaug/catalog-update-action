@@ -4,6 +4,13 @@
   "description": "Automated dependency updates for Bun catalog: protocol",
   "license": "MIT",
   "type": "module",
+  "bin": {
+    "catalog-update": "src/main.ts"
+  },
+  "files": [
+    "src",
+    "schema.json"
+  ],
   "scripts": {
     "start": "bun src/main.ts",
     "dry-run": "bun src/main.ts --dry-run",

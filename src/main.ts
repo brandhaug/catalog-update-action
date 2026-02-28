@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 import { loadConfig } from './config'
 import { parseCatalog } from './catalog'
 import { queryNpmRegistry, queryPackageMetadata, queryReleaseNotes } from './registry'
@@ -10,6 +11,30 @@ import type { UpdateCandidate } from './types'
 // CLI argument parsing
 // ---------------------------------------------------------------------------
 
+const HELP_TEXT = `
+catalog-update — Automated dependency updates for Bun catalog: protocol
+
+Usage:
+  catalog-update [options]
+  bunx catalog-update-action [options]
+
+Options:
+  -h, --help            Show this help message and exit
+  -v, --version         Show version and exit
+  -d, --dry-run         Show what would be updated without creating PRs
+  -c, --config <path>   Path to config file (default: .catalog-updaterc.json)
+
+Examples:
+  # Preview updates without creating PRs
+  catalog-update --dry-run
+
+  # Use a custom config file
+  catalog-update --config custom-config.json
+
+  # GitHub Action usage (in .github/workflows/*.yml)
+  - uses: brandhaug/catalog-update-action@v1
+`.trim()
+
 function parseArgs(): { dryRun: boolean; configPath: string } {
   const args = process.argv.slice(2)
   let configPath = '.catalog-updaterc.json'
@@ -17,11 +42,22 @@ function parseArgs(): { dryRun: boolean; configPath: string } {
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
-    if (arg === '--dry-run') {
+    if (arg === '--help' || arg === '-h') {
+      console.log(HELP_TEXT)
+      process.exit(0)
+    } else if (arg === '--version' || arg === '-v') {
+      const pkg = require('../package.json')
+      console.log(pkg.version)
+      process.exit(0)
+    } else if (arg === '--dry-run' || arg === '-d') {
       dryRun = true
-    } else if (arg === '--config' && args[i + 1] !== undefined) {
+    } else if ((arg === '--config' || arg === '-c') && args[i + 1] !== undefined) {
       configPath = args[i + 1] as string
       i++
+    } else if (arg.startsWith('-')) {
+      console.error(`Unknown option: ${arg}`)
+      console.error('Run with --help for usage information.')
+      process.exit(1)
     }
   }
 
