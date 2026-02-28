@@ -45,15 +45,34 @@ jobs:
 ### CLI
 
 ```bash
-# Full run (creates PRs)
-bun src/main.ts
+# Run via bunx (no install needed)
+bunx catalog-update-action --dry-run
 
-# Preview only
-bun src/main.ts --dry-run
+# Or via npx
+npx catalog-update-action --dry-run
+
+# Install globally
+bun add -g catalog-update-action
+catalog-update --dry-run
+
+# Full run (creates PRs)
+catalog-update
 
 # Custom config path
-bun src/main.ts --config path/to/.catalog-updaterc.json
+catalog-update -c path/to/.catalog-updaterc.json
+
+# Show help
+catalog-update --help
 ```
+
+#### CLI Options
+
+| Flag | Short | Description |
+| --- | --- | --- |
+| `--help` | `-h` | Show help message and exit |
+| `--version` | `-v` | Show version and exit |
+| `--dry-run` | `-d` | Preview updates without creating PRs |
+| `--config <path>` | `-c` | Path to config file (default: `.catalog-updaterc.json`) |
 
 ## Configuration
 
