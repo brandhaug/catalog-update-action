@@ -11,7 +11,7 @@ const DEFAULT_CONFIG: Config = {
 }
 
 const VALID_PACKAGE_MANAGERS = new Set(['bun', 'npm', 'pnpm', 'yarn'])
-const VALID_UPDATE_TYPES = new Set<SemverChange>(['major', 'minor', 'patch'])
+const VALID_UPDATE_TYPES = new Set<SemverChange>(['major', 'minor', 'patch', 'prerelease'])
 
 function parseUpdateTypes({ raw }: { raw: unknown }): SemverChange[] | null {
   if (raw === null || raw === undefined) return null

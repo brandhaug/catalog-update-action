@@ -1,4 +1,4 @@
-export type SemverChange = 'major' | 'minor' | 'patch'
+export type SemverChange = 'major' | 'minor' | 'patch' | 'prerelease'
 
 export interface CatalogEntry {
   name: string

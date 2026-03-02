@@ -60,7 +60,7 @@ describe('parseCatalog', () => {
     })
   })
 
-  test('skips pre-release versions', () => {
+  test('includes pre-release versions', () => {
     const entries = parseCatalog({
       catalog: {
         '@typescript/native-preview': '7.0.0-dev.123',
@@ -70,8 +70,13 @@ describe('parseCatalog', () => {
       }
     })
 
-    expect(entries).toHaveLength(1)
-    expect(entries[0]?.name).toBe('react')
+    expect(entries).toHaveLength(4)
+    expect(entries.map((e) => e.name)).toEqual([
+      '@typescript/native-preview',
+      'some-beta',
+      'some-rc',
+      'react'
+    ])
   })
 
   test('skips invalid semver', () => {

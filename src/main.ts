@@ -106,7 +106,7 @@ async function main(): Promise<void> {
   }
 
   const entries = parseCatalog({ catalog })
-  console.log(`  Found ${entries.length} catalog entries (skipped pre-release versions)`)
+  console.log(`  Found ${entries.length} catalog entries`)
 
   // 3. Query npm registry
   console.log('\n3. Querying npm registry...')

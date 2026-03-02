@@ -60,7 +60,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["major", "minor", "patch"]
+              "enum": ["major", "minor", "patch", "prerelease"]
             },
             "minItems": 1,
             "description": "Restrict to specific semver change types. Omit to match all types."
@@ -85,7 +85,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "enum": ["major", "minor", "patch"]
+              "enum": ["major", "minor", "patch", "prerelease"]
             },
             "minItems": 1,
             "description": "Only ignore specific change types. Omit to ignore all updates for matched packages."

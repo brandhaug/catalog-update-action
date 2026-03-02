@@ -25,13 +25,55 @@ export function matchesAnyPattern({ name, patterns }: { name: string; patterns: 
 // Semver utilities
 // ---------------------------------------------------------------------------
 
-export function parseSemver({ version }: { version: string }): { major: number; minor: number; patch: number } | null {
-  const match = version.match(/^(\d+)\.(\d+)\.(\d+)/)
+export function parseSemver({ version }: { version: string }): { major: number; minor: number; patch: number; prerelease?: string } | null {
+  const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?/)
   if (!match) return null
-  return { major: Number(match[1]), minor: Number(match[2]), patch: Number(match[3]) }
+  const result: { major: number; minor: number; patch: number; prerelease?: string } = {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3])
+  }
+  if (match[4]) result.prerelease = match[4]
+  return result
 }
 
-export type SemverChange = 'major' | 'minor' | 'patch'
+/** Compare prerelease identifiers per semver 2.0.0 spec: release > prerelease, numeric < string, left-to-right. */
+function comparePrerelease(a?: string, b?: string): number {
+  if (a === b) return 0
+  // release (no prerelease) > prerelease
+  if (!a) return 1
+  if (!b) return -1
+
+  const partsA = a.split('.')
+  const partsB = b.split('.')
+  const len = Math.max(partsA.length, partsB.length)
+
+  for (let i = 0; i < len; i++) {
+    const pa = partsA[i]
+    const pb = partsB[i]
+    // Fewer identifiers < more identifiers when all preceding are equal
+    if (pa === undefined) return -1
+    if (pb === undefined) return 1
+
+    const numA = /^\d+$/.test(pa) ? Number(pa) : null
+    const numB = /^\d+$/.test(pb) ? Number(pb) : null
+
+    if (numA !== null && numB !== null) {
+      if (numA !== numB) return numA - numB
+    } else if (numA !== null) {
+      return -1 // numeric < string
+    } else if (numB !== null) {
+      return 1 // string > numeric
+    } else {
+      const cmp = pa.localeCompare(pb)
+      if (cmp !== 0) return cmp
+    }
+  }
+
+  return 0
+}
+
+export type { SemverChange } from './types'
 
 export function classifySemverChange({ from, to }: { from: string; to: string }): SemverChange | null {
   const a = parseSemver({ version: from })
@@ -41,7 +83,11 @@ export function classifySemverChange({ from, to }: { from: string; to: string })
   if (b.major < a.major) return null
   if (b.minor > a.minor) return 'minor'
   if (b.minor < a.minor) return null
-  if (b.patch > a.patch) return 'patch'
+  if (b.patch > a.patch) return a.prerelease ? 'prerelease' : 'patch'
+  if (b.patch < a.patch) return null
+  // Same major.minor.patch — compare prerelease
+  const cmp = comparePrerelease(a.prerelease, b.prerelease)
+  if (cmp < 0) return 'prerelease'
   return null
 }
 
@@ -51,7 +97,8 @@ export function compareSemver({ a, b }: { a: string; b: string }): number {
   if (!pa || !pb) return 0
   if (pa.major !== pb.major) return pa.major - pb.major
   if (pa.minor !== pb.minor) return pa.minor - pb.minor
-  return pa.patch - pb.patch
+  if (pa.patch !== pb.patch) return pa.patch - pb.patch
+  return comparePrerelease(pa.prerelease, pb.prerelease)
 }
 
 /** Parse version from GitHub release tag formats: v1.2.3, 1.2.3, name@1.2.3, @scope/name@1.2.3 */
@@ -65,23 +112,25 @@ export function extractVersionFromTag({ tag }: { tag: string }): string | null {
 
 /**
  * Return versions where current < version <= latest, sorted descending (newest first).
- * Excludes pre-releases, caps at maxVersions.
+ * Excludes pre-releases unless `includePrerelease` is set. Caps at maxVersions.
  * Falls back to [latestVersion] if no intermediate versions found.
  */
 export function getIntermediateVersions({
   publishedVersions,
   currentVersion,
   latestVersion,
-  maxVersions = 10
+  maxVersions = 10,
+  includePrerelease = false
 }: {
   publishedVersions: string[]
   currentVersion: string
   latestVersion: string
   maxVersions?: number
+  includePrerelease?: boolean
 }): string[] {
   const intermediate = publishedVersions
     .filter((v) => {
-      if (v.includes('-')) return false
+      if (!includePrerelease && v.includes('-')) return false
       if (!parseSemver({ version: v })) return false
       return compareSemver({ a: currentVersion, b: v }) < 0 && compareSemver({ a: v, b: latestVersion }) <= 0
     })

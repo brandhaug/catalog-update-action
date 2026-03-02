@@ -6,11 +6,6 @@ export function parseCatalog({ catalog }: { catalog: Record<string, string> }): 
   const entries: CatalogEntry[] = []
 
   for (const [name, raw] of Object.entries(catalog)) {
-    // Skip pre-release versions (e.g., @typescript/native-preview with -dev.123 in version)
-    if (/\d-(?:dev|alpha|beta|rc|canary|next|preview)(?:[.\d]|$)/.test(raw)) {
-      continue
-    }
-
     // Handle npm: aliases (e.g., "npm:rolldown-vite@7.3.1" or "npm:rolldown-vite@^7.3.1")
     const aliasMatch = raw.match(/^npm:(.+)@(.+)$/)
     const aliasNpmName = aliasMatch?.[1]
