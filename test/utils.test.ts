@@ -19,7 +19,7 @@ describe('parseSemver', () => {
   })
 
   test('parses semver with pre-release suffix', () => {
-    expect(parseSemver({ version: '1.2.3-beta.1' })).toEqual({ major: 1, minor: 2, patch: 3 })
+    expect(parseSemver({ version: '1.2.3-beta.1' })).toEqual({ major: 1, minor: 2, patch: 3, prerelease: 'beta.1' })
   })
 
   test('returns null for invalid version', () => {
@@ -63,6 +63,26 @@ describe('classifySemverChange', () => {
     expect(classifySemverChange({ from: 'invalid', to: '1.0.0' })).toBeNull()
     expect(classifySemverChange({ from: '1.0.0', to: 'invalid' })).toBeNull()
   })
+
+  test('detects prerelease-to-prerelease change', () => {
+    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.0-beta.16' })).toBe('prerelease')
+  })
+
+  test('detects prerelease graduation to stable', () => {
+    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.0' })).toBe('prerelease')
+  })
+
+  test('detects prerelease to higher minor', () => {
+    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.1.0' })).toBe('minor')
+  })
+
+  test('detects prerelease to higher patch', () => {
+    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.1' })).toBe('prerelease')
+  })
+
+  test('returns null for stable to prerelease downgrade', () => {
+    expect(classifySemverChange({ from: '8.0.0', to: '8.0.0-beta.1' })).toBeNull()
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -88,6 +108,20 @@ describe('compareSemver', () => {
 
   test('returns 0 for invalid versions', () => {
     expect(compareSemver({ a: 'bad', b: '1.0.0' })).toBe(0)
+  })
+
+  test('prerelease < release with same base', () => {
+    expect(compareSemver({ a: '1.0.0-beta.1', b: '1.0.0' })).toBeLessThan(0)
+    expect(compareSemver({ a: '1.0.0', b: '1.0.0-beta.1' })).toBeGreaterThan(0)
+  })
+
+  test('orders prereleases numerically', () => {
+    expect(compareSemver({ a: '1.0.0-beta.1', b: '1.0.0-beta.2' })).toBeLessThan(0)
+    expect(compareSemver({ a: '1.0.0-beta.15', b: '1.0.0-beta.16' })).toBeLessThan(0)
+  })
+
+  test('returns 0 for equal prereleases', () => {
+    expect(compareSemver({ a: '1.0.0-beta.1', b: '1.0.0-beta.1' })).toBe(0)
   })
 })
 
@@ -225,5 +259,24 @@ describe('getIntermediateVersions', () => {
     })
     expect(result).toEqual(['1.1.0'])
     expect(result).not.toContain('1.0.0')
+  })
+
+  test('includes prerelease versions when includePrerelease is true', () => {
+    const result = getIntermediateVersions({
+      publishedVersions: ['1.0.0-beta.1', '1.0.0-beta.2', '1.0.0-beta.3', '1.0.0'],
+      currentVersion: '1.0.0-beta.1',
+      latestVersion: '1.0.0',
+      includePrerelease: true
+    })
+    expect(result).toEqual(['1.0.0', '1.0.0-beta.3', '1.0.0-beta.2'])
+  })
+
+  test('excludes prerelease versions by default even with prerelease current', () => {
+    const result = getIntermediateVersions({
+      publishedVersions: ['1.0.0-beta.1', '1.0.0-beta.2', '1.0.0'],
+      currentVersion: '1.0.0-beta.1',
+      latestVersion: '1.0.0'
+    })
+    expect(result).toEqual(['1.0.0'])
   })
 })

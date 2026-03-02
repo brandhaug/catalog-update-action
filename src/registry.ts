@@ -5,7 +5,7 @@ import type {
   UpdateCandidate,
   VersionReleaseNote
 } from './types'
-import { extractVersionFromTag, getIntermediateVersions, Semaphore } from './utils'
+import { compareSemver, extractVersionFromTag, getIntermediateVersions, parseSemver, Semaphore } from './utils'
 
 const RELEASE_NOTES_MAX_LENGTH = 2000
 const COMBINED_RELEASE_NOTES_MAX_LENGTH = 5000
@@ -38,10 +38,27 @@ export async function queryNpmRegistry({
         return
       }
 
-      const data = (await response.json()) as { 'dist-tags'?: { latest?: string } }
-      const latest = data['dist-tags']?.latest
-      if (latest && !latest.includes('-')) {
-        results.set(entry.name, latest)
+      const data = (await response.json()) as {
+        'dist-tags'?: { latest?: string }
+        versions?: Record<string, unknown>
+      }
+
+      if (parseSemver({ version: entry.currentVersion })?.prerelease) {
+        // Prerelease entry: find highest version from all published versions
+        const allVersions = data.versions ? Object.keys(data.versions) : []
+        let best: string | null = null
+        for (const v of allVersions) {
+          if (!parseSemver({ version: v })) continue
+          if (compareSemver({ a: entry.currentVersion, b: v }) >= 0) continue
+          if (!best || compareSemver({ a: best, b: v }) < 0) best = v
+        }
+        if (best) results.set(entry.name, best)
+      } else {
+        // Stable entry: use dist-tags.latest, reject prereleases
+        const latest = data['dist-tags']?.latest
+        if (latest && !latest.includes('-')) {
+          results.set(entry.name, latest)
+        }
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? (error.stack ?? error.message) : String(error)
@@ -60,7 +77,7 @@ export async function queryNpmRegistry({
 // ---------------------------------------------------------------------------
 
 function parseGitHubRepo({ url }: { url: string }): GitHubRepo | null {
-  const match = url.match(/github\.com[/:]([w.-]+)\/([w.-]+?)(?:\.git)?$/)
+  const match = url.match(/github\.com[/:]([\\w.-]+)\/([\\w.-]+?)(?:\.git)?$/)
   if (!match?.[1] || !match[2]) return null
   return { owner: match[1], repo: match[2] }
 }
@@ -190,7 +207,8 @@ export async function queryReleaseNotes({
         const intermediateVersions = getIntermediateVersions({
           publishedVersions: metadata.publishedVersions,
           currentVersion: candidate.currentVersion,
-          latestVersion: candidate.latestVersion
+          latestVersion: candidate.latestVersion,
+          includePrerelease: candidate.currentVersion.includes('-')
         })
 
         const notes: VersionReleaseNote[] = []

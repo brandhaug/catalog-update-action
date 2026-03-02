@@ -48,7 +48,7 @@ export function assignToGroups({
   const CATCH_ALL = 'all-patch-updates'
   for (const [groupName, members] of result) {
     if (groupName === CATCH_ALL) continue
-    const hasMajorOrMinor = members.some((m) => m.changeType !== 'patch')
+    const hasMajorOrMinor = members.some((m) => m.changeType !== 'patch' && m.changeType !== 'prerelease')
     if (hasMajorOrMinor) continue
 
     const patchGroup = result.get(CATCH_ALL) ?? []
