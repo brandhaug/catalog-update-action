@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseFixedVersion, computeOverrides, buildOverridePrBody, isOverrideBranchOutdated, buildOverrideBranchUpdate } from '../src/audit'
+import { parseFixedVersion, computeOverrides, buildOverridePrBody, isOverrideBranchOutdated, buildOverrideBranchUpdate, overrideKey } from '../src/audit'
 import type { AuditAdvisory, AuditResult, OverrideEntry, Severity } from '../src/types'
 
 function makeAdvisory(overrides: Partial<AuditAdvisory> = {}): AuditAdvisory {
@@ -59,7 +59,7 @@ describe('parseFixedVersion', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeOverrides', () => {
-  test('basic case — returns override for vulnerable package', () => {
+  test('basic case — returns override with vulnerableRange', () => {
     const auditResult: AuditResult = {
       'lodash': [makeAdvisory({ vulnerable_versions: '<4.17.21', severity: 'high' })]
     }
@@ -73,7 +73,9 @@ describe('computeOverrides', () => {
 
     expect(result).toHaveLength(1)
     expect(result[0]!.packageName).toBe('lodash')
+    expect(result[0]!.vulnerableRange).toBe('<4.17.21')
     expect(result[0]!.fixedVersion).toBe('4.17.21')
+    expect(overrideKey(result[0]!)).toBe('lodash@<4.17.21')
   })
 
   test('skips packages in catalogNames (direct deps)', () => {
@@ -106,11 +108,11 @@ describe('computeOverrides', () => {
     expect(result).toHaveLength(0)
   })
 
-  test('takes highest fixed version from multiple advisories', () => {
+  test('same vulnerable_versions groups advisories together', () => {
     const auditResult: AuditResult = {
       'lodash': [
-        makeAdvisory({ vulnerable_versions: '<4.17.19', severity: 'high' }),
-        makeAdvisory({ vulnerable_versions: '<4.17.21', severity: 'critical' })
+        makeAdvisory({ id: 1, vulnerable_versions: '<4.17.21', severity: 'high' }),
+        makeAdvisory({ id: 2, vulnerable_versions: '<4.17.21', severity: 'critical' })
       ]
     }
 
@@ -122,10 +124,37 @@ describe('computeOverrides', () => {
     })
 
     expect(result).toHaveLength(1)
+    expect(result[0]!.vulnerableRange).toBe('<4.17.21')
     expect(result[0]!.fixedVersion).toBe('4.17.21')
+    expect(result[0]!.advisories).toHaveLength(2)
   })
 
-  test('skips if existing override already at or above fixed version', () => {
+  test('different vulnerable_versions produce separate entries', () => {
+    const auditResult: AuditResult = {
+      'ws': [
+        makeAdvisory({ id: 1, vulnerable_versions: '>=7.0.0 <7.5.10', severity: 'high' }),
+        makeAdvisory({ id: 2, vulnerable_versions: '>=8.0.0 <8.17.1', severity: 'high' })
+      ]
+    }
+
+    const result = computeOverrides({
+      auditResult,
+      catalogNames: new Set(),
+      minimumSeverity: 'moderate',
+      existingOverrides: {}
+    })
+
+    expect(result).toHaveLength(2)
+    const sorted = [...result].sort((a, b) => a.vulnerableRange.localeCompare(b.vulnerableRange))
+    expect(sorted[0]!.vulnerableRange).toBe('>=7.0.0 <7.5.10')
+    expect(sorted[0]!.fixedVersion).toBe('7.5.10')
+    expect(overrideKey(sorted[0]!)).toBe('ws@>=7.0.0 <7.5.10')
+    expect(sorted[1]!.vulnerableRange).toBe('>=8.0.0 <8.17.1')
+    expect(sorted[1]!.fixedVersion).toBe('8.17.1')
+    expect(overrideKey(sorted[1]!)).toBe('ws@>=8.0.0 <8.17.1')
+  })
+
+  test('skips if existing override (scoped key) already at or above fixed version', () => {
     const auditResult: AuditResult = {
       'lodash': [makeAdvisory({ vulnerable_versions: '<4.17.21', severity: 'high' })]
     }
@@ -134,7 +163,7 @@ describe('computeOverrides', () => {
       auditResult,
       catalogNames: new Set(),
       minimumSeverity: 'moderate',
-      existingOverrides: { lodash: '4.17.21' }
+      existingOverrides: { 'lodash@<4.17.21': '4.17.21' }
     })
 
     expect(result).toHaveLength(0)
@@ -175,16 +204,17 @@ describe('buildOverridePrBody', () => {
   const overrides: OverrideEntry[] = [
     {
       packageName: 'lodash',
+      vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
       advisories: [makeAdvisory({ id: 100, severity: 'high', title: 'Prototype Pollution' })]
     }
   ]
 
-  test('contains summary table', () => {
+  test('contains summary table with vulnerable range column', () => {
     const body = buildOverridePrBody({ overrides })
 
-    expect(body).toContain('| Package | Fixed Version | Severity | Advisory |')
-    expect(body).toContain('| `lodash` | 4.17.21 |')
+    expect(body).toContain('| Package | Vulnerable Range | Fixed Version | Severity | Advisory |')
+    expect(body).toContain('| `lodash` | `<4.17.21` | 4.17.21 |')
   })
 
   test('contains advisory details in collapsible sections', () => {
@@ -211,6 +241,7 @@ describe('buildOverrideBranchUpdate', () => {
   test('builds correct branch name', () => {
     const overrides: OverrideEntry[] = [{
       packageName: 'lodash',
+      vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
       advisories: [makeAdvisory()]
     }]
@@ -226,6 +257,7 @@ describe('buildOverrideBranchUpdate', () => {
   test('singular title for one dependency', () => {
     const overrides: OverrideEntry[] = [{
       packageName: 'lodash',
+      vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
       advisories: [makeAdvisory()]
     }]
@@ -240,8 +272,8 @@ describe('buildOverrideBranchUpdate', () => {
 
   test('plural title for multiple dependencies', () => {
     const overrides: OverrideEntry[] = [
-      { packageName: 'lodash', fixedVersion: '4.17.21', advisories: [makeAdvisory()] },
-      { packageName: 'minimist', fixedVersion: '1.2.6', advisories: [makeAdvisory()] }
+      { packageName: 'lodash', vulnerableRange: '<4.17.21', fixedVersion: '4.17.21', advisories: [makeAdvisory()] },
+      { packageName: 'minimist', vulnerableRange: '<1.2.6', fixedVersion: '1.2.6', advisories: [makeAdvisory()] }
     ]
 
     const result = buildOverrideBranchUpdate({
@@ -252,9 +284,10 @@ describe('buildOverrideBranchUpdate', () => {
     expect(result.title).toBe('fix(security): override 2 vulnerable transitive dependencies')
   })
 
-  test('applyChanges merges overrides preserving existing', () => {
+  test('applyChanges uses scoped keys and preserves existing', () => {
     const overrides: OverrideEntry[] = [{
       packageName: 'lodash',
+      vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
       advisories: [makeAdvisory()]
     }]
@@ -264,12 +297,12 @@ describe('buildOverrideBranchUpdate', () => {
       branchPrefix: 'catalog-update'
     })
 
-    const pkg: Record<string, unknown> = { overrides: { minimist: '1.2.6' } }
+    const pkg: Record<string, unknown> = { overrides: { 'minimist@<1.2.6': '1.2.6' } }
     result.applyChanges(pkg)
 
     const applied = pkg.overrides as Record<string, string>
-    expect(applied.lodash).toBe('4.17.21')
-    expect(applied.minimist).toBe('1.2.6')
+    expect(applied['lodash@<4.17.21']).toBe('4.17.21')
+    expect(applied['minimist@<1.2.6']).toBe('1.2.6')
   })
 })
 
@@ -281,6 +314,7 @@ describe('isOverrideBranchOutdated', () => {
   const expectedOverrides: OverrideEntry[] = [
     {
       packageName: 'lodash',
+      vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
       advisories: [makeAdvisory()]
     }
@@ -294,9 +328,9 @@ describe('isOverrideBranchOutdated', () => {
     expect(result).toBe(true)
   })
 
-  test('returns false when overrides match', () => {
+  test('returns false when overrides match (scoped key)', () => {
     const result = isOverrideBranchOutdated({
-      branchPackageJson: { overrides: { lodash: '4.17.21' } },
+      branchPackageJson: { overrides: { 'lodash@<4.17.21': '4.17.21' } },
       expectedOverrides
     })
     expect(result).toBe(false)
@@ -304,7 +338,7 @@ describe('isOverrideBranchOutdated', () => {
 
   test('returns true when override values are stale', () => {
     const result = isOverrideBranchOutdated({
-      branchPackageJson: { overrides: { lodash: '4.17.19' } },
+      branchPackageJson: { overrides: { 'lodash@<4.17.21': '4.17.19' } },
       expectedOverrides
     })
     expect(result).toBe(true)

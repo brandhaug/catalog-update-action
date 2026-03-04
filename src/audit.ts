@@ -1,4 +1,4 @@
-import type { AuditAdvisory, AuditResult, BranchUpdate, OverrideEntry, Severity } from './types'
+import type { AuditResult, BranchUpdate, OverrideEntry, Severity } from './types'
 import { compareSemver, getOverrideBranchPrefix, PR_FOOTER } from './utils'
 
 // ---------------------------------------------------------------------------
@@ -88,6 +88,14 @@ export function parseFixedVersion({ vulnerableVersions }: { vulnerableVersions: 
 }
 
 // ---------------------------------------------------------------------------
+// Override key helper
+// ---------------------------------------------------------------------------
+
+export function overrideKey(entry: Pick<OverrideEntry, 'packageName' | 'vulnerableRange'>): string {
+  return `${entry.packageName}@${entry.vulnerableRange}`
+}
+
+// ---------------------------------------------------------------------------
 // Compute overrides from audit results
 // ---------------------------------------------------------------------------
 
@@ -103,37 +111,46 @@ export function computeOverrides({
   existingOverrides: Record<string, string>
 }): OverrideEntry[] {
   const minLevel = SEVERITY_ORDER[minimumSeverity]
-  const entries: OverrideEntry[] = []
+
+  // Group by (packageName, vulnerable_versions) — each unique pair becomes one override entry
+  const groupMap = new Map<string, OverrideEntry>()
 
   for (const [packageName, advisories] of Object.entries(auditResult)) {
     if (catalogNames.has(packageName)) continue
 
-    const qualifying = advisories.filter((a) => SEVERITY_ORDER[a.severity] >= minLevel)
-    if (qualifying.length === 0) continue
+    for (const advisory of advisories) {
+      if (SEVERITY_ORDER[advisory.severity] < minLevel) continue
 
-    // Collect all fixed versions from qualifying advisories
-    const fixedVersions: { version: string; advisory: AuditAdvisory }[] = []
-    for (const advisory of qualifying) {
       const fixed = parseFixedVersion({ vulnerableVersions: advisory.vulnerable_versions })
-      if (fixed) fixedVersions.push({ version: fixed, advisory })
+      if (!fixed) continue
+
+      const groupKey = overrideKey({ packageName, vulnerableRange: advisory.vulnerable_versions })
+      const existing = groupMap.get(groupKey)
+
+      if (existing) {
+        existing.advisories.push(advisory)
+        // Keep the highest fixed version within the group
+        if (compareSemver({ a: fixed, b: existing.fixedVersion }) > 0) {
+          existing.fixedVersion = fixed
+        }
+      } else {
+        groupMap.set(groupKey, {
+          packageName,
+          vulnerableRange: advisory.vulnerable_versions,
+          fixedVersion: fixed,
+          advisories: [advisory]
+        })
+      }
     }
+  }
 
-    if (fixedVersions.length === 0) continue
+  const entries: OverrideEntry[] = []
 
-    // Take the highest fixed version
-    const highest = fixedVersions.reduce((best, curr) =>
-      compareSemver({ a: curr.version, b: best.version }) > 0 ? curr : best
-    )
+  for (const group of groupMap.values()) {
+    const existingVersion = existingOverrides[overrideKey(group)]
+    if (existingVersion && compareSemver({ a: existingVersion, b: group.fixedVersion }) >= 0) continue
 
-    // Skip if existing override is already at or above the fixed version
-    const existing = existingOverrides[packageName]
-    if (existing && compareSemver({ a: existing, b: highest.version }) >= 0) continue
-
-    entries.push({
-      packageName,
-      fixedVersion: highest.version,
-      advisories: qualifying
-    })
+    entries.push(group)
   }
 
   return entries
@@ -144,17 +161,17 @@ export function computeOverrides({
 // ---------------------------------------------------------------------------
 
 export function buildOverridePrBody({ overrides }: { overrides: OverrideEntry[] }): string {
-  const sorted = [...overrides].sort((a, b) => a.packageName.localeCompare(b.packageName))
+  const sorted = [...overrides].sort((a, b) => a.packageName.localeCompare(b.packageName) || a.vulnerableRange.localeCompare(b.vulnerableRange))
 
   const lines = [
     '## Vulnerability Overrides',
     '',
-    '| Package | Fixed Version | Severity | Advisory |',
-    '| --- | --- | --- | --- |',
+    '| Package | Vulnerable Range | Fixed Version | Severity | Advisory |',
+    '| --- | --- | --- | --- | --- |',
     ...sorted.map((o) => {
       const severities = [...new Set(o.advisories.map((a) => a.severity))].join(', ')
       const urls = o.advisories.map((a) => `[${a.id}](${a.url})`).join(', ')
-      return `| \`${o.packageName}\` | ${o.fixedVersion} | ${severities} | ${urls} |`
+      return `| \`${o.packageName}\` | \`${o.vulnerableRange}\` | ${o.fixedVersion} | ${severities} | ${urls} |`
     }),
     ''
   ]
@@ -211,7 +228,7 @@ export function buildOverrideBranchUpdate({
       const current = (packageJson.overrides as Record<string, string> | undefined) ?? {}
       const merged = { ...current }
       for (const entry of overrides) {
-        merged[entry.packageName] = entry.fixedVersion
+        merged[overrideKey(entry)] = entry.fixedVersion
       }
       packageJson.overrides = merged
     }
@@ -233,7 +250,7 @@ export function isOverrideBranchOutdated({
   if (!overrides) return true
 
   for (const entry of expectedOverrides) {
-    if (overrides[entry.packageName] !== entry.fixedVersion) return true
+    if (overrides[overrideKey(entry)] !== entry.fixedVersion) return true
   }
 
   return false

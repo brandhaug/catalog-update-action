@@ -20,6 +20,7 @@ export type AuditResult = Record<string, AuditAdvisory[]>
 
 export interface OverrideEntry {
   packageName: string
+  vulnerableRange: string
   fixedVersion: string
   advisories: AuditAdvisory[]
 }
