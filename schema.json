@@ -92,6 +92,24 @@
           }
         }
       }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Configuration for transitive dependency vulnerability overrides via bun audit",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automated overrides for vulnerable transitive dependencies"
+        },
+        "minimumSeverity": {
+          "type": "string",
+          "enum": ["info", "low", "moderate", "high", "critical"],
+          "default": "moderate",
+          "description": "Minimum severity level to create overrides for"
+        }
+      }
     }
   }
 }
