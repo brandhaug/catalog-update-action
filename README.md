@@ -17,6 +17,7 @@ Dependabot doesn't understand Bun's `catalog:` protocol — it can't update the 
 - Creates and syncs PRs via the GitHub CLI — closes stale ones, rebuilds conflicting ones
 - Includes release notes from GitHub Releases in PR descriptions
 - Supports `^` ranges and `npm:` aliases
+- Detects vulnerable transitive dependencies via `bun audit` and creates override PRs
 - Runs as a GitHub Action or standalone CLI
 
 ## Prerequisites
@@ -132,7 +133,11 @@ Create a `.catalog-updaterc.json` in your repository root:
   ],
   "ignore": [
     { "pattern": "*storybook*", "updateTypes": ["major"] }
-  ]
+  ],
+  "audit": {
+    "enabled": true,
+    "minimumSeverity": "moderate"
+  }
 }
 ```
 
@@ -149,6 +154,7 @@ Create a `.catalog-updaterc.json` in your repository root:
 | `packageManager` | `string` | `"bun"` | Package manager for lockfile updates (`bun`, `npm`, `pnpm`, `yarn`) |
 | `groups` | `array` | `[]` | Dependency grouping rules (see below) |
 | `ignore` | `array` | `[]` | Dependency ignore rules (see below) |
+| `audit` | `object` | `{}` | Transitive vulnerability audit settings (see below) |
 
 ### Groups
 
@@ -190,18 +196,50 @@ Ignore rules prevent certain updates from being created:
 }
 ```
 
+### Vulnerability Audit
+
+When enabled, the action runs `bun audit --json` to detect vulnerable transitive dependencies and creates a PR that adds [`overrides`](https://bun.sh/docs/install/overrides) to your `package.json`, pinning transitive dependencies to patched versions.
+
+- **`enabled`** — Enable or disable the audit pipeline (default: `true`)
+- **`minimumSeverity`** — Minimum advisory severity to act on: `"info"`, `"low"`, `"moderate"`, `"high"`, `"critical"` (default: `"moderate"`)
+
+```json
+{
+  "audit": {
+    "minimumSeverity": "high"
+  }
+}
+```
+
+To disable the audit entirely:
+
+```json
+{
+  "audit": {
+    "enabled": false
+  }
+}
+```
+
+The override PR is created with security priority (before catalog PRs) and shares the same `maxOpenPrs` budget. Direct catalog dependencies are excluded from overrides since they are handled by the catalog update pipeline.
+
 ## How It Works
 
 1. **Parse** — Reads the `catalog` field from root `package.json`, extracting package names and current versions (supports `^` ranges and `npm:` aliases)
 2. **Query** — Fetches latest stable versions from the npm registry (skips pre-releases)
 3. **Filter** — Applies ignore rules and classifies updates as major/minor/patch
 4. **Group** — Assigns updates to configured groups; unmatched packages get individual PRs
-5. **Sync** — For existing PRs: closes stale ones, rebuilds conflicting or outdated ones
-6. **Create** — Creates new PRs for groups that don't have one yet, respecting the `maxOpenPrs` limit
+5. **Audit** — If audit is enabled, runs `bun audit --json` to find vulnerable transitive dependencies and computes required overrides
+6. **Sync** — For existing PRs: closes stale ones, rebuilds conflicting or outdated ones
+7. **Create** — Creates new PRs (override PR first for security priority, then catalog PRs), respecting the `maxOpenPrs` limit
 
-Each PR includes:
+Each catalog PR includes:
 - A table of all updated packages with version changes
 - Release notes fetched from GitHub Releases (with intermediate version support for monorepos)
+
+Each override PR includes:
+- A summary table of overridden packages with fixed versions and advisory links
+- Collapsible advisory details (severity, CVSS score, CWE, vulnerable version ranges)
 
 ## Contributing
 

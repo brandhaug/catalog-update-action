@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { loadConfig } from '../src/config'
+import { loadConfig, parseAuditConfig } from '../src/config'
 import { join } from 'node:path'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -31,6 +31,7 @@ describe('loadConfig', () => {
     expect(config.packageManager).toBe('bun')
     expect(config.groups).toEqual([])
     expect(config.ignore).toEqual([])
+    expect(config.audit).toEqual({ enabled: true, minimumSeverity: 'moderate' })
   })
 
   test('loads valid config', async () => {
@@ -124,5 +125,52 @@ describe('loadConfig', () => {
 
     expect(config.groups).toHaveLength(1)
     expect(config.groups[0]?.name).toBe('valid')
+  })
+
+  test('loads audit config', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({
+      audit: { enabled: true, minimumSeverity: 'high' }
+    }))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.audit.enabled).toBe(true)
+    expect(config.audit.minimumSeverity).toBe('high')
+  })
+
+  test('uses audit defaults for missing fields', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({
+      audit: { enabled: true }
+    }))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.audit.enabled).toBe(true)
+    expect(config.audit.minimumSeverity).toBe('moderate')
+  })
+})
+
+describe('parseAuditConfig', () => {
+  test('returns defaults for null/undefined', () => {
+    expect(parseAuditConfig({ raw: null })).toEqual({ enabled: true, minimumSeverity: 'moderate' })
+    expect(parseAuditConfig({ raw: undefined })).toEqual({ enabled: true, minimumSeverity: 'moderate' })
+  })
+
+  test('returns defaults for non-object', () => {
+    expect(parseAuditConfig({ raw: 'string' })).toEqual({ enabled: true, minimumSeverity: 'moderate' })
+  })
+
+  test('parses valid config', () => {
+    expect(parseAuditConfig({ raw: { enabled: true, minimumSeverity: 'critical' } })).toEqual({
+      enabled: true,
+      minimumSeverity: 'critical'
+    })
+  })
+
+  test('falls back to default for invalid severity', () => {
+    expect(parseAuditConfig({ raw: { enabled: true, minimumSeverity: 'invalid' } })).toEqual({
+      enabled: true,
+      minimumSeverity: 'moderate'
+    })
   })
 })

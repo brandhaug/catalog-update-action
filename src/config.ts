@@ -1,4 +1,9 @@
-import type { Config, GroupDefinition, IgnoreRule, SemverChange } from './types'
+import type { Config, GroupDefinition, IgnoreRule, AuditConfig, Severity, SemverChange } from './types'
+
+const DEFAULT_AUDIT_CONFIG: AuditConfig = {
+  enabled: true,
+  minimumSeverity: 'moderate'
+}
 
 const DEFAULT_CONFIG: Config = {
   branchPrefix: 'catalog-update',
@@ -7,11 +12,13 @@ const DEFAULT_CONFIG: Config = {
   concurrency: 10,
   packageManager: 'bun',
   groups: [],
-  ignore: []
+  ignore: [],
+  audit: DEFAULT_AUDIT_CONFIG
 }
 
 const VALID_PACKAGE_MANAGERS = new Set(['bun', 'npm', 'pnpm', 'yarn'])
 const VALID_UPDATE_TYPES = new Set<SemverChange>(['major', 'minor', 'patch', 'prerelease'])
+const VALID_SEVERITIES = new Set<Severity>(['info', 'low', 'moderate', 'high', 'critical'])
 
 function parseUpdateTypes({ raw }: { raw: unknown }): SemverChange[] | null {
   if (raw === null || raw === undefined) return null
@@ -32,6 +39,18 @@ function parseGroups({ raw }: { raw: unknown }): GroupDefinition[] {
       patterns: (g.patterns as unknown[]).filter((p): p is string => typeof p === 'string'),
       updateTypes: parseUpdateTypes({ raw: g.updateTypes })
     }))
+}
+
+export function parseAuditConfig({ raw }: { raw: unknown }): AuditConfig {
+  if (!raw || typeof raw !== 'object') return DEFAULT_AUDIT_CONFIG
+
+  const obj = raw as Record<string, unknown>
+  return {
+    enabled: typeof obj.enabled === 'boolean' ? obj.enabled : DEFAULT_AUDIT_CONFIG.enabled,
+    minimumSeverity: VALID_SEVERITIES.has(obj.minimumSeverity as Severity)
+      ? (obj.minimumSeverity as Severity)
+      : DEFAULT_AUDIT_CONFIG.minimumSeverity
+  }
 }
 
 function parseIgnoreRules({ raw }: { raw: unknown }): IgnoreRule[] {
@@ -67,7 +86,8 @@ export async function loadConfig({ configPath }: { configPath: string }): Promis
         ? (raw.packageManager as Config['packageManager'])
         : DEFAULT_CONFIG.packageManager,
       groups: parseGroups({ raw: raw.groups }),
-      ignore: parseIgnoreRules({ raw: raw.ignore })
+      ignore: parseIgnoreRules({ raw: raw.ignore }),
+      audit: parseAuditConfig({ raw: raw.audit })
     }
   } catch (error) {
     console.error(`Failed to load config from ${configPath}:`, error)
