@@ -4,7 +4,7 @@ import { parseCatalog } from './catalog'
 import { queryNpmRegistry, queryPackageMetadata, queryReleaseNotes } from './registry'
 import { shouldIgnore, assignToGroups } from './groups'
 import { exec, getExistingPrs, syncExistingPrs, createPr, buildCatalogBranchUpdate, buildCatalogValue } from './git'
-import { runAudit, computeOverrides, buildOverrideBranchUpdate, isOverrideBranchOutdated } from './audit'
+import { runAudit, computeOverrides, buildOverrideBranchUpdate, isOverrideBranchOutdated, overrideKey } from './audit'
 import { classifySemverChange, Semaphore, getOverrideBranchPrefix } from './utils'
 import type { BranchUpdate, OverrideEntry, UpdateCandidate, VersionReleaseNote } from './types'
 
@@ -192,7 +192,7 @@ async function main(): Promise<void> {
         console.log(`  Found ${overrideEntries.length} transitive vulnerability override(s):`)
         for (const o of overrideEntries) {
           const severities = [...new Set(o.advisories.map((a) => a.severity))].join(', ')
-          console.log(`    ${o.packageName} → ${o.fixedVersion} (${severities})`)
+          console.log(`    ${overrideKey(o)} → ${o.fixedVersion} (${severities})`)
         }
 
         overrideBranchUpdate = buildOverrideBranchUpdate({
