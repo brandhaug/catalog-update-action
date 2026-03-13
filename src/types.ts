@@ -26,6 +26,21 @@ export interface OverrideEntry {
 }
 
 // ---------------------------------------------------------------------------
+// Directory context (for multi-directory / monorepo support)
+// ---------------------------------------------------------------------------
+
+export interface DirectoryContext {
+  /** Repo root (absolute path, used for git operations) */
+  cwd: string
+  /** Project directory (absolute path, used for install/audit) */
+  workDir: string
+  /** Absolute path to package.json */
+  packageJsonPath: string
+  /** Repo-relative path to package.json (for git show / git add) */
+  packageJsonRelPath: string
+}
+
+// ---------------------------------------------------------------------------
 // Generic PR abstraction
 // ---------------------------------------------------------------------------
 

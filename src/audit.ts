@@ -210,13 +210,15 @@ export function buildOverridePrBody({ overrides }: { overrides: OverrideEntry[] 
 
 export function buildOverrideBranchUpdate({
   overrides,
-  branchPrefix
+  branchPrefix,
+  titleSuffix = ''
 }: {
   overrides: OverrideEntry[]
   branchPrefix: string
+  titleSuffix?: string
 }): BranchUpdate {
   const n = overrides.length
-  const title = `fix(security): override ${n} vulnerable transitive ${n === 1 ? 'dependency' : 'dependencies'}`
+  const title = `fix(security): override ${n} vulnerable transitive ${n === 1 ? 'dependency' : 'dependencies'}${titleSuffix}`
   const body = buildOverridePrBody({ overrides })
   const branch = `${getOverrideBranchPrefix({ branchPrefix })}/vulnerability-fixes`
 

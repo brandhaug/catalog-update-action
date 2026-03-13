@@ -1,4 +1,4 @@
-import type { BranchUpdate, Config, ExistingPr, UpdateCandidate, VersionReleaseNote } from './types'
+import type { BranchUpdate, Config, DirectoryContext, ExistingPr, UpdateCandidate, VersionReleaseNote } from './types'
 import { formatReleaseNotes } from './registry'
 import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
 
@@ -86,19 +86,24 @@ export function buildCatalogBranchUpdate({
   groupName,
   updates,
   config,
+  titleSuffix = '',
+  branchPrefix,
   releaseNotes
 }: {
   groupName: string
   updates: UpdateCandidate[]
   config: Config
+  titleSuffix?: string
+  branchPrefix?: string
   releaseNotes: Map<string, VersionReleaseNote[]>
 }): BranchUpdate {
-  const branch = `${config.branchPrefix}/${groupName}`
+  const prefix = branchPrefix ?? config.branchPrefix
+  const branch = `${prefix}/${groupName}`
   const first = updates[0]
   const title =
     first && updates.length === 1
-      ? `chore(deps): bump ${first.name} from ${first.currentVersion} to ${first.latestVersion}`
-      : `chore(deps): bump ${groupName} dependencies`
+      ? `chore(deps): bump ${first.name} from ${first.currentVersion} to ${first.latestVersion}${titleSuffix}`
+      : `chore(deps): bump ${groupName} dependencies${titleSuffix}`
   const body = buildCatalogPrBody({ updates, releaseNotes })
 
   return {
@@ -208,13 +213,15 @@ export async function isBranchBehindDefault({
 
 export async function readBranchPackageJson({
   branch,
-  cwd
+  cwd,
+  packageJsonRelPath
 }: {
   branch: string
   cwd: string
+  packageJsonRelPath: string
 }): Promise<Record<string, unknown> | null> {
   const { stdout, exitCode } = await exec({
-    command: ['git', 'show', `origin/${branch}:package.json`],
+    command: ['git', 'show', `origin/${branch}:${packageJsonRelPath}`],
     cwd
   })
 
@@ -242,15 +249,14 @@ async function returnToDefault({ defaultBranch, cwd }: { defaultBranch: string; 
 export async function updateBranch({
   branchUpdate,
   config,
-  cwd,
-  packageJsonPath
+  dir
 }: {
   branchUpdate: BranchUpdate
   config: Config
-  cwd: string
-  packageJsonPath: string
+  dir: DirectoryContext
 }): Promise<{ success: boolean }> {
   const { branch, title, applyChanges } = branchUpdate
+  const { cwd, workDir, packageJsonPath, packageJsonRelPath } = dir
 
   const checkoutResult = await exec({
     command: ['git', 'checkout', '-B', branch, `origin/${config.defaultBranch}`],
@@ -271,22 +277,23 @@ export async function updateBranch({
   await Bun.write(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
 
   console.log('  Running install...')
-  const installResult = await exec({ command: getInstallCommand({ packageManager: config.packageManager }), cwd })
+  const installResult = await exec({ command: getInstallCommand({ packageManager: config.packageManager }), cwd: workDir })
   if (installResult.exitCode !== 0) {
     console.error(`  Failed to run install for branch "${branch}"`)
     await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
     return { success: false }
   }
 
-  const { stdout: diffFiles } = await exec({ command: ['git', 'diff', '--name-only'], cwd })
-  const lockfileNames = new Set(['package.json', 'bun.lock', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'])
-  const unexpectedFiles = diffFiles.split('\n').filter((f) => f && !lockfileNames.has(f))
+  const { stdout: diffOutput } = await exec({ command: ['git', 'diff', '--name-only'], cwd })
+  const changedFiles = diffOutput.split('\n').filter(Boolean)
+
+  const lockfileBasenames = new Set(['package.json', 'bun.lock', 'package-lock.json', 'pnpm-lock.yaml', 'yarn.lock'])
+  const unexpectedFiles = changedFiles.filter((f) => !lockfileBasenames.has(f.split('/').pop() || f))
   if (unexpectedFiles.length > 0) {
     console.warn(`  Warning: install modified unexpected files: ${unexpectedFiles.join(', ')}`)
   }
 
-  const filesToStage = ['package.json', ...diffFiles.split('\n').filter(Boolean)]
-  await exec({ command: ['git', 'add', ...filesToStage], cwd })
+  await exec({ command: ['git', 'add', packageJsonRelPath, ...changedFiles], cwd })
 
   // --no-verify: skip pre-commit hooks since this is an automated action
   const commitResult = await exec({ command: ['git', 'commit', '--no-verify', '-m', title], cwd })
@@ -313,17 +320,15 @@ export async function updateBranch({
 export async function createPr({
   branchUpdate,
   config,
-  cwd,
-  packageJsonPath
+  dir
 }: {
   branchUpdate: BranchUpdate
   config: Config
-  cwd: string
-  packageJsonPath: string
+  dir: DirectoryContext
 }): Promise<boolean> {
   console.log(`\n  Creating PR for branch "${branchUpdate.branch}"`)
 
-  const result = await updateBranch({ branchUpdate, config, cwd, packageJsonPath })
+  const result = await updateBranch({ branchUpdate, config, dir })
   if (!result.success) return false
 
   const prResult = await exec({
@@ -334,7 +339,7 @@ export async function createPr({
       '--title', branchUpdate.title,
       '--body', branchUpdate.body
     ],
-    cwd
+    cwd: dir.cwd
   })
 
   if (prResult.exitCode === 0) {
@@ -355,15 +360,13 @@ export async function syncExistingPrs({
   resolveBranchUpdate,
   isBranchContentOutdated,
   config,
-  cwd,
-  packageJsonPath
+  dir
 }: {
   existingPrs: ExistingPr[]
   resolveBranchUpdate: (branchName: string) => BranchUpdate | null
   isBranchContentOutdated: (branchPackageJson: Record<string, unknown>, branchName: string) => boolean
   config: Config
-  cwd: string
-  packageJsonPath: string
+  dir: DirectoryContext
 }): Promise<{ closedCount: number; rebuiltCount: number }> {
   if (existingPrs.length === 0) {
     console.log('  No existing PRs to sync')
@@ -375,7 +378,7 @@ export async function syncExistingPrs({
   const nonBotResults = new Map<number, boolean>()
   await Promise.all(
     existingPrs.map(async (pr) => {
-      nonBotResults.set(pr.number, await hasNonBotCommits({ pr, cwd }))
+      nonBotResults.set(pr.number, await hasNonBotCommits({ pr, cwd: dir.cwd }))
     })
   )
 
@@ -397,7 +400,7 @@ export async function syncExistingPrs({
           'gh', 'pr', 'close', String(pr.number),
           '--comment', 'Closing: all packages in this group are already up to date.'
         ],
-        cwd
+        cwd: dir.cwd
       })
       if (closeResult.exitCode === 0) {
         closedCount++
@@ -405,14 +408,14 @@ export async function syncExistingPrs({
       continue
     }
 
-    const mergeable = await resolveMergeableState({ pr, cwd })
+    const mergeable = await resolveMergeableState({ pr, cwd: dir.cwd })
     const isConflicting = mergeable === 'CONFLICTING'
     const behindDefault =
-      !isConflicting && (await isBranchBehindDefault({ branch: pr.headRefName, defaultBranch: config.defaultBranch, cwd }))
+      !isConflicting && (await isBranchBehindDefault({ branch: pr.headRefName, defaultBranch: config.defaultBranch, cwd: dir.cwd }))
 
     let hasContentChanges = false
     if (!isConflicting && !behindDefault) {
-      const branchPkg = await readBranchPackageJson({ branch: pr.headRefName, cwd })
+      const branchPkg = await readBranchPackageJson({ branch: pr.headRefName, cwd: dir.cwd, packageJsonRelPath: dir.packageJsonRelPath })
       hasContentChanges = !branchPkg || isBranchContentOutdated(branchPkg, pr.headRefName)
     }
 
@@ -427,7 +430,7 @@ export async function syncExistingPrs({
     console.log(`\n  Rebuilding PR #${pr.number} (${pr.headRefName}) — ${reason}`)
 
     try {
-      const result = await updateBranch({ branchUpdate, config, cwd, packageJsonPath })
+      const result = await updateBranch({ branchUpdate, config, dir })
       if (!result.success) {
         console.error(`  Failed to rebuild PR #${pr.number} (${pr.headRefName})`)
         continue
@@ -435,7 +438,7 @@ export async function syncExistingPrs({
 
       const editResult = await exec({
         command: ['gh', 'pr', 'edit', String(pr.number), '--title', branchUpdate.title, '--body', branchUpdate.body],
-        cwd
+        cwd: dir.cwd
       })
 
       if (editResult.exitCode !== 0) {

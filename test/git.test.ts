@@ -171,4 +171,50 @@ describe('buildCatalogBranchUpdate', () => {
     const pkg: Record<string, unknown> = {}
     expect(() => result.applyChanges(pkg)).toThrow('No valid catalog found')
   })
+
+  test('appends titleSuffix for single package in working directory', () => {
+    const updates = [makeCandidate({ name: 'react', currentVersion: '18.0.0', latestVersion: '19.0.0' })]
+    const result = buildCatalogBranchUpdate({
+      groupName: 'react',
+      updates,
+      config: baseConfig,
+      titleSuffix: ' in /apps/frontend',
+      branchPrefix: 'catalog-update/apps/frontend',
+      releaseNotes: new Map()
+    })
+
+    expect(result.branch).toBe('catalog-update/apps/frontend/react')
+    expect(result.title).toBe('chore(deps): bump react from 18.0.0 to 19.0.0 in /apps/frontend')
+  })
+
+  test('appends titleSuffix for group in working directory', () => {
+    const updates = [
+      makeCandidate({ name: 'react', currentVersion: '18.0.0', latestVersion: '19.0.0' }),
+      makeCandidate({ name: 'react-dom', currentVersion: '18.0.0', latestVersion: '19.0.0' })
+    ]
+    const result = buildCatalogBranchUpdate({
+      groupName: 'react-group',
+      updates,
+      config: baseConfig,
+      titleSuffix: ' in /mito',
+      branchPrefix: 'catalog-update/mito',
+      releaseNotes: new Map()
+    })
+
+    expect(result.branch).toBe('catalog-update/mito/react-group')
+    expect(result.title).toBe('chore(deps): bump react-group dependencies in /mito')
+  })
+
+  test('uses config.branchPrefix when branchPrefix not provided', () => {
+    const updates = [makeCandidate({ name: 'react', currentVersion: '18.0.0', latestVersion: '19.0.0' })]
+    const result = buildCatalogBranchUpdate({
+      groupName: 'react',
+      updates,
+      config: baseConfig,
+      releaseNotes: new Map()
+    })
+
+    expect(result.branch).toBe('catalog-update/react')
+    expect(result.title).toBe('chore(deps): bump react from 18.0.0 to 19.0.0')
+  })
 })
