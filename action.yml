@@ -3,13 +3,16 @@ description: 'Automated dependency updates for Bun catalog: protocol. Replaces D
 
 inputs:
   config:
-    description: 'Path to .catalog-updaterc.json config file'
+    description: 'Path to .catalog-updaterc.json config file (relative to each discovered directory)'
     default: '.catalog-updaterc.json'
   dry-run:
     description: 'Preview updates without creating PRs'
     default: 'false'
   token:
     description: 'GitHub token for creating PRs. Defaults to github.token. Use a PAT or GitHub App token to trigger downstream workflows.'
+    default: ''
+  exclude-directories:
+    description: 'Comma-separated directories to exclude from catalog discovery (supports glob patterns)'
     default: ''
 
 branding:
@@ -32,4 +35,5 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token || github.token }}
+        CATALOG_UPDATE_EXCLUDE: ${{ inputs.exclude-directories }}
       run: bun ${{ github.action_path }}/src/main.ts --config "${{ inputs.config }}" ${{ inputs.dry-run == 'true' && '--dry-run' || '' }}

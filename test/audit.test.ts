@@ -284,6 +284,24 @@ describe('buildOverrideBranchUpdate', () => {
     expect(result.title).toBe('fix(security): override 2 vulnerable transitive dependencies')
   })
 
+  test('appends titleSuffix for working directory', () => {
+    const overrides: OverrideEntry[] = [{
+      packageName: 'lodash',
+      vulnerableRange: '<4.17.21',
+      fixedVersion: '4.17.21',
+      advisories: [makeAdvisory()]
+    }]
+
+    const result = buildOverrideBranchUpdate({
+      overrides,
+      branchPrefix: 'catalog-update/apps/backend',
+      titleSuffix: ' in /apps/backend'
+    })
+
+    expect(result.branch).toBe('catalog-update/apps/backend-override/vulnerability-fixes')
+    expect(result.title).toBe('fix(security): override 1 vulnerable transitive dependency in /apps/backend')
+  })
+
   test('applyChanges uses scoped keys and preserves existing', () => {
     const overrides: OverrideEntry[] = [{
       packageName: 'lodash',
