@@ -180,6 +180,25 @@ describe('assignToGroups', () => {
     expect(result.size).toBe(0)
   })
 
+  test('collapses release-only groups into all-patch-updates', () => {
+    const candidates = [
+      makeCandidate({ name: '@next/core', changeType: 'release' }),
+      makeCandidate({ name: '@next/router', changeType: 'release' }),
+      makeCandidate({ name: 'lodash-es', changeType: 'patch' })
+    ]
+
+    const result = assignToGroups({
+      candidates,
+      groups: [
+        { name: 'next', patterns: ['@next/*'], updateTypes: null },
+        { name: 'all-patch-updates', patterns: ['*'], updateTypes: ['patch', 'release'] }
+      ]
+    })
+
+    expect(result.has('next')).toBe(false)
+    expect(result.get('all-patch-updates')).toHaveLength(3)
+  })
+
   test('collapses prerelease-only groups into all-patch-updates', () => {
     const candidates = [
       makeCandidate({ name: '@next/core', changeType: 'prerelease' }),

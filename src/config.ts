@@ -17,7 +17,7 @@ const DEFAULT_CONFIG: Config = {
 }
 
 const VALID_PACKAGE_MANAGERS = new Set(['bun', 'npm', 'pnpm', 'yarn'])
-const VALID_UPDATE_TYPES = new Set<SemverChange>(['major', 'minor', 'patch', 'prerelease'])
+const VALID_UPDATE_TYPES = new Set<SemverChange>(['major', 'minor', 'patch', 'prerelease', 'release'])
 const VALID_SEVERITIES = new Set<Severity>(['info', 'low', 'moderate', 'high', 'critical'])
 
 function parseUpdateTypes({ raw }: { raw: unknown }): SemverChange[] | null {
