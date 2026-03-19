@@ -69,15 +69,19 @@ describe('classifySemverChange', () => {
   })
 
   test('detects prerelease graduation to stable', () => {
-    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.0' })).toBe('prerelease')
+    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.0' })).toBe('release')
   })
 
   test('detects prerelease to higher minor', () => {
     expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.1.0' })).toBe('minor')
   })
 
-  test('detects prerelease to higher patch', () => {
-    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.1' })).toBe('prerelease')
+  test('detects prerelease to higher stable patch', () => {
+    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.1' })).toBe('release')
+  })
+
+  test('detects prerelease to higher prerelease patch', () => {
+    expect(classifySemverChange({ from: '8.0.0-beta.15', to: '8.0.1-beta.1' })).toBe('prerelease')
   })
 
   test('returns null for stable to prerelease downgrade', () => {

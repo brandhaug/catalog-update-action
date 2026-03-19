@@ -84,11 +84,11 @@ export function classifySemverChange({ from, to }: { from: string; to: string })
   if (b.major < a.major) return null
   if (b.minor > a.minor) return 'minor'
   if (b.minor < a.minor) return null
-  if (b.patch > a.patch) return a.prerelease ? 'prerelease' : 'patch'
+  if (b.patch > a.patch) return a.prerelease ? (b.prerelease ? 'prerelease' : 'release') : 'patch'
   if (b.patch < a.patch) return null
   // Same major.minor.patch — compare prerelease
   const cmp = comparePrerelease(a.prerelease, b.prerelease)
-  if (cmp < 0) return 'prerelease'
+  if (cmp < 0) return a.prerelease && !b.prerelease ? 'release' : 'prerelease'
   return null
 }
 

@@ -111,6 +111,18 @@ describe('loadConfig', () => {
     expect(config.groups[0]?.updateTypes).toEqual(['prerelease', 'patch'])
   })
 
+  test('accepts release as valid update type', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({
+      groups: [
+        { name: 'test', patterns: ['*'], updateTypes: ['release', 'patch'] }
+      ]
+    }))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.groups[0]?.updateTypes).toEqual(['release', 'patch'])
+  })
+
   test('skips groups with missing required fields', async () => {
     const configPath = await writeTempConfig(JSON.stringify({
       groups: [

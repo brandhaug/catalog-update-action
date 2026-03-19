@@ -1,4 +1,4 @@
-export type SemverChange = 'major' | 'minor' | 'patch' | 'prerelease'
+export type SemverChange = 'major' | 'minor' | 'patch' | 'prerelease' | 'release'
 
 // ---------------------------------------------------------------------------
 // Audit types
