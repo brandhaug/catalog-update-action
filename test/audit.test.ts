@@ -154,7 +154,7 @@ describe('computeOverrides', () => {
     expect(overrideKey(sorted[1]!)).toBe('ws@>=8.0.0 <8.17.1')
   })
 
-  test('skips if existing override (scoped key) already at or above fixed version', () => {
+  test('includes stale overrides (existing but still reported by audit)', () => {
     const auditResult: AuditResult = {
       'lodash': [makeAdvisory({ vulnerable_versions: '<4.17.21', severity: 'high' })]
     }
@@ -166,7 +166,8 @@ describe('computeOverrides', () => {
       existingOverrides: { 'lodash@<4.17.21': '4.17.21' }
     })
 
-    expect(result).toHaveLength(0)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.existingOverrideStale).toBe(true)
   })
 
   test('skips when no upper bound in vulnerable_versions', () => {

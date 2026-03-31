@@ -23,6 +23,8 @@ export interface OverrideEntry {
   vulnerableRange: string
   fixedVersion: string
   advisories: AuditAdvisory[]
+  /** True when an override already exists in package.json but bun audit still reports the vulnerability (stale lockfile). */
+  existingOverrideStale?: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +52,12 @@ export interface BranchUpdate {
   body: string
   /** Mutates the given packageJson object in place to apply this update's changes. */
   applyChanges: (packageJson: Record<string, unknown>) => void
+  /**
+   * When true, delete the lockfile before running install to force full
+   * re-resolution.  Needed for override branches because bun's `@range`
+   * override syntax is ignored for already-locked packages.
+   */
+  deleteLockfile?: boolean
 }
 
 // ---------------------------------------------------------------------------

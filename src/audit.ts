@@ -148,7 +148,12 @@ export function computeOverrides({
 
   for (const group of groupMap.values()) {
     const existingVersion = existingOverrides[overrideKey(group)]
-    if (existingVersion && compareSemver({ a: existingVersion, b: group.fixedVersion }) >= 0) continue
+    if (existingVersion && compareSemver({ a: existingVersion, b: group.fixedVersion }) >= 0) {
+      // The override exists in package.json but bun audit still reports the
+      // vulnerability — the lockfile wasn't re-resolved after the override was
+      // added.  Include it so the PR branch can delete the lockfile and reinstall.
+      group.existingOverrideStale = true
+    }
 
     entries.push(group)
   }
@@ -226,6 +231,7 @@ export function buildOverrideBranchUpdate({
     branch,
     title,
     body,
+    deleteLockfile: true,
     applyChanges: (packageJson: Record<string, unknown>) => {
       const current = (packageJson.overrides as Record<string, string> | undefined) ?? {}
       const merged = { ...current }

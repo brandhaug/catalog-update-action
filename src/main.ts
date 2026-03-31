@@ -226,7 +226,12 @@ async function processDirectory({
       })
 
       if (overrideEntries.length > 0) {
-        console.log(`    Found ${overrideEntries.length} transitive vulnerability override(s)`)
+        const staleCount = overrideEntries.filter((e) => e.existingOverrideStale).length
+        const newCount = overrideEntries.length - staleCount
+        const parts: string[] = []
+        if (newCount > 0) parts.push(`${newCount} new`)
+        if (staleCount > 0) parts.push(`${staleCount} stale (lockfile not re-resolved)`)
+        console.log(`    Found ${overrideEntries.length} transitive vulnerability override(s): ${parts.join(', ')}`)
         overrideBranchUpdate = buildOverrideBranchUpdate({
           overrides: overrideEntries,
           branchPrefix: effectiveBranchPrefix,

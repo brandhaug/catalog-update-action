@@ -44,6 +44,15 @@ function getInstallCommand({ packageManager }: { packageManager: Config['package
   }
 }
 
+function getLockfileName({ packageManager }: { packageManager: Config['packageManager'] }): string {
+  switch (packageManager) {
+    case 'bun': return 'bun.lock'
+    case 'npm': return 'package-lock.json'
+    case 'pnpm': return 'pnpm-lock.yaml'
+    case 'yarn': return 'yarn.lock'
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Catalog PR body
 // ---------------------------------------------------------------------------
@@ -255,7 +264,7 @@ export async function updateBranch({
   config: Config
   dir: DirectoryContext
 }): Promise<{ success: boolean }> {
-  const { branch, title, applyChanges } = branchUpdate
+  const { branch, title, applyChanges, deleteLockfile } = branchUpdate
   const { cwd, workDir, packageJsonPath, packageJsonRelPath } = dir
 
   const checkoutResult = await exec({
@@ -275,6 +284,19 @@ export async function updateBranch({
   }
 
   await Bun.write(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
+
+  // Bun's @range override syntax is ignored for already-locked packages.
+  // Deleting the lockfile forces a full re-resolution so overrides apply.
+  if (deleteLockfile) {
+    const lockfileName = getLockfileName({ packageManager: config.packageManager })
+    const lockfilePath = `${workDir}/${lockfileName}`
+    const exists = await Bun.file(lockfilePath).exists()
+    if (exists) {
+      const { unlinkSync } = require('node:fs')
+      unlinkSync(lockfilePath)
+      console.log(`  Deleted ${lockfileName} to force re-resolution of overrides`)
+    }
+  }
 
   console.log('  Running install...')
   const installResult = await exec({ command: getInstallCommand({ packageManager: config.packageManager }), cwd: workDir })
