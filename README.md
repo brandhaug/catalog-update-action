@@ -125,6 +125,7 @@ Create a `.catalog-updaterc.json` in your repository root:
   "maxOpenPrs": 20,
   "concurrency": 10,
   "packageManager": "bun",
+  "minReleaseAgeDays": 3,
   "groups": [
     { "name": "react", "patterns": ["react", "react-dom"] },
     { "name": "vite", "patterns": ["vite", "vitest", "@vitejs/*", "@vitest/*"] },
@@ -152,6 +153,7 @@ Create a `.catalog-updaterc.json` in your repository root:
 | `maxOpenPrs` | `number` | `20` | Maximum number of open PRs at any time |
 | `concurrency` | `number` | `10` | Max concurrent npm registry requests |
 | `packageManager` | `string` | `"bun"` | Package manager for lockfile updates (`bun`, `npm`, `pnpm`, `yarn`) |
+| `minReleaseAgeDays` | `number` | `0` | Minimum days a release must be published before creating a PR (supply chain protection). `0` = disabled. Does not apply to audit overrides |
 | `groups` | `array` | `[]` | Dependency grouping rules (see below) |
 | `ignore` | `array` | `[]` | Dependency ignore rules (see below) |
 | `audit` | `object` | `{}` | Transitive vulnerability audit settings (see below) |
@@ -196,6 +198,18 @@ Ignore rules prevent certain updates from being created:
 }
 ```
 
+### Minimum Release Age
+
+As a supply chain security measure, you can require releases to be published for a minimum number of days before the action creates a PR. This quarantine period gives the community time to discover and flag compromised packages.
+
+```json
+{
+  "minReleaseAgeDays": 3
+}
+```
+
+When the latest version is too young, the action falls back to the newest published version that meets the age requirement. If no version qualifies, the package is skipped entirely. Vulnerability audit overrides are **not** affected by this setting — security fixes are never delayed.
+
 ### Vulnerability Audit
 
 When enabled, the action runs `bun audit --json` to detect vulnerable transitive dependencies and creates a PR that adds [`overrides`](https://bun.sh/docs/install/overrides) to your `package.json`, pinning transitive dependencies to patched versions.
@@ -227,7 +241,7 @@ The override PR is created with security priority (before catalog PRs) and share
 
 1. **Parse** — Reads the `catalog` field from root `package.json`, extracting package names and current versions (supports `^` ranges and `npm:` aliases)
 2. **Query** — Fetches latest stable versions from the npm registry (skips pre-releases)
-3. **Filter** — Applies ignore rules and classifies updates as major/minor/patch
+3. **Filter** — Applies ignore rules, classifies updates as major/minor/patch, and enforces minimum release age (if configured)
 4. **Group** — Assigns updates to configured groups; unmatched packages get individual PRs
 5. **Audit** — If audit is enabled, runs `bun audit --json` to find vulnerable transitive dependencies and computes required overrides
 6. **Sync** — For existing PRs: closes stale ones, rebuilds conflicting or outdated ones

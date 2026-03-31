@@ -37,6 +37,12 @@
       "default": "bun",
       "description": "Package manager used for lockfile updates"
     },
+    "minReleaseAgeDays": {
+      "type": "integer",
+      "default": 0,
+      "minimum": 0,
+      "description": "Minimum number of days a release must be published before creating a PR. Helps prevent supply chain attacks by quarantining new releases. Set to 0 to disable (default). Does not apply to vulnerability audit overrides."
+    },
     "groups": {
       "type": "array",
       "default": [],

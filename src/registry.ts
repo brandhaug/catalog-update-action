@@ -5,7 +5,7 @@ import type {
   UpdateCandidate,
   VersionReleaseNote
 } from './types'
-import { compareSemver, extractVersionFromTag, getIntermediateVersions, parseSemver, Semaphore } from './utils'
+import { classifySemverChange, compareSemver, extractVersionFromTag, getIntermediateVersions, parseSemver, Semaphore } from './utils'
 
 const RELEASE_NOTES_MAX_LENGTH = 2000
 const COMBINED_RELEASE_NOTES_MAX_LENGTH = 5000
@@ -73,6 +73,128 @@ export async function queryNpmRegistry({
 }
 
 // ---------------------------------------------------------------------------
+// Release age filtering
+// ---------------------------------------------------------------------------
+
+/** Returns the age of a version in days based on its npm publish time, or null if unknown. */
+export function getVersionAgeDays({ publishTime, now }: { publishTime: string; now: Date }): number | null {
+  const publishDate = new Date(publishTime)
+  if (isNaN(publishDate.getTime())) return null
+  return (now.getTime() - publishDate.getTime()) / (1000 * 60 * 60 * 24)
+}
+
+/**
+ * Filter candidates by minimum release age. For each candidate whose latest version
+ * is too young, attempt to find the newest published version that satisfies the age
+ * requirement and is still an upgrade from current. If none qualifies, the candidate
+ * is removed.
+ */
+export function filterByReleaseAge({
+  candidates,
+  packageMetadata,
+  minReleaseAgeDays,
+  now = new Date()
+}: {
+  candidates: UpdateCandidate[]
+  packageMetadata: Map<string, PackageMetadata>
+  minReleaseAgeDays: number
+  now?: Date
+}): UpdateCandidate[] {
+  if (minReleaseAgeDays <= 0) return candidates
+
+  const filtered: UpdateCandidate[] = []
+
+  for (const candidate of candidates) {
+    const metadata = packageMetadata.get(candidate.name)
+    const publishTimes = metadata?.publishTimes ?? {}
+
+    const latestPublishTime = publishTimes[candidate.latestVersion]
+    if (!latestPublishTime) {
+      // No publish time data — allow the update (don't block on missing data)
+      filtered.push(candidate)
+      continue
+    }
+
+    const ageDays = getVersionAgeDays({ publishTime: latestPublishTime, now })
+    if (ageDays === null || ageDays >= minReleaseAgeDays) {
+      filtered.push(candidate)
+      continue
+    }
+
+    // Latest version is too young — find the best qualifying version
+    const bestVersion = findBestQualifyingVersion({
+      currentVersion: candidate.currentVersion,
+      publishedVersions: metadata?.publishedVersions ?? [],
+      publishTimes,
+      minReleaseAgeDays,
+      isPrerelease: candidate.currentVersion.includes('-'),
+      now
+    })
+
+    if (bestVersion) {
+      const changeType = classifySemverChange({ from: candidate.currentVersion, to: bestVersion })
+      if (changeType) {
+        filtered.push({ ...candidate, latestVersion: bestVersion, changeType })
+        console.log(
+          `    ${candidate.name}: ${candidate.latestVersion} is ${Math.max(0, ageDays).toFixed(0)} day(s) old ` +
+          `(minimum: ${minReleaseAgeDays}), falling back to ${bestVersion}`
+        )
+        continue
+      }
+    }
+
+    console.log(
+      `    Skipping ${candidate.name} ${candidate.latestVersion}: ` +
+      `published ${Math.max(0, ageDays).toFixed(0)} day(s) ago (minimum: ${minReleaseAgeDays} days)`
+    )
+  }
+
+  return filtered
+}
+
+/** Find the newest published version that is older than minReleaseAgeDays and newer than currentVersion. */
+function findBestQualifyingVersion({
+  currentVersion,
+  publishedVersions,
+  publishTimes,
+  minReleaseAgeDays,
+  isPrerelease,
+  now
+}: {
+  currentVersion: string
+  publishedVersions: string[]
+  publishTimes: Record<string, string>
+  minReleaseAgeDays: number
+  isPrerelease: boolean
+  now: Date
+}): string | null {
+  let best: string | null = null
+
+  for (const version of publishedVersions) {
+    // Skip pre-releases unless current is pre-release
+    if (!isPrerelease && version.includes('-')) continue
+    if (!parseSemver({ version })) continue
+
+    // Must be an upgrade from current
+    if (compareSemver({ a: currentVersion, b: version }) >= 0) continue
+
+    // Must meet the age requirement
+    const publishTime = publishTimes[version]
+    if (!publishTime) continue
+
+    const ageDays = getVersionAgeDays({ publishTime, now })
+    if (ageDays === null || ageDays < minReleaseAgeDays) continue
+
+    // Keep the newest qualifying version
+    if (!best || compareSemver({ a: best, b: version }) < 0) {
+      best = version
+    }
+  }
+
+  return best
+}
+
+// ---------------------------------------------------------------------------
 // Package metadata (GitHub repo URLs + published versions)
 // ---------------------------------------------------------------------------
 
@@ -112,6 +234,7 @@ export async function queryPackageMetadata({
       const data = (await response.json()) as {
         repository?: { url?: string }
         versions?: Record<string, unknown>
+        time?: Record<string, string>
       }
       const repoUrl = data.repository?.url
       if (!repoUrl) return
@@ -120,7 +243,8 @@ export async function queryPackageMetadata({
       if (!repo) return
 
       const publishedVersions = data.versions ? Object.keys(data.versions) : []
-      const metadata: PackageMetadata = { repo, publishedVersions }
+      const publishTimes = data.time ?? {}
+      const metadata: PackageMetadata = { repo, publishedVersions, publishTimes }
 
       seen.set(candidate.npmName, metadata)
       results.set(candidate.name, metadata)

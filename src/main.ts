@@ -2,7 +2,7 @@
 import { loadConfig } from './config'
 import { parseCatalog } from './catalog'
 import { discoverCatalogDirectories } from './discover'
-import { queryNpmRegistry, queryPackageMetadata, queryReleaseNotes } from './registry'
+import { queryNpmRegistry, queryPackageMetadata, queryReleaseNotes, filterByReleaseAge } from './registry'
 import { shouldIgnore, assignToGroups } from './groups'
 import { exec, getExistingPrs, syncExistingPrs, createPr, buildCatalogBranchUpdate, buildCatalogValue } from './git'
 import { runAudit, computeOverrides, buildOverrideBranchUpdate, isOverrideBranchOutdated } from './audit'
@@ -119,6 +119,9 @@ async function processDirectory({
   console.log(`    Groups: ${config.groups.length}`)
   console.log(`    Ignore rules: ${config.ignore.length}`)
   console.log(`    Audit: ${config.audit.enabled ? `enabled (minimum severity: ${config.audit.minimumSeverity})` : 'disabled'}`)
+  if (config.minReleaseAgeDays > 0) {
+    console.log(`    Min release age: ${config.minReleaseAgeDays} day(s)`)
+  }
 
   // 2. Parse catalog
   console.log('  Parsing catalog...')
@@ -141,7 +144,7 @@ async function processDirectory({
 
   // 4. Find updates
   console.log('  Finding available updates...')
-  const candidates: UpdateCandidate[] = []
+  let candidates: UpdateCandidate[] = []
 
   for (const entry of entries) {
     const latest = latestVersions.get(entry.name)
@@ -167,6 +170,17 @@ async function processDirectory({
     console.log('  Fetching package metadata...')
     const packageMetadata = await queryPackageMetadata({ candidates, semaphore })
     console.log(`    Found metadata for ${packageMetadata.size}/${candidates.length} packages`)
+
+    // Filter by minimum release age (supply chain protection)
+    if (config.minReleaseAgeDays > 0) {
+      console.log(`  Filtering by minimum release age (${config.minReleaseAgeDays} day(s))...`)
+      const beforeCount = candidates.length
+      candidates = filterByReleaseAge({ candidates, packageMetadata, minReleaseAgeDays: config.minReleaseAgeDays })
+      const skipped = beforeCount - candidates.length
+      if (skipped > 0) {
+        console.log(`    Skipped ${skipped} package(s) due to release age`)
+      }
+    }
 
     console.log('  Fetching release notes...')
     releaseNotes = await queryReleaseNotes({ candidates, packageMetadata, semaphore })

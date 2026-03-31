@@ -29,6 +29,7 @@ describe('loadConfig', () => {
     expect(config.maxOpenPrs).toBe(20)
     expect(config.concurrency).toBe(10)
     expect(config.packageManager).toBe('bun')
+    expect(config.minReleaseAgeDays).toBe(0)
     expect(config.groups).toEqual([])
     expect(config.ignore).toEqual([])
     expect(config.audit).toEqual({ enabled: true, minimumSeverity: 'moderate' })
@@ -159,6 +160,54 @@ describe('loadConfig', () => {
 
     expect(config.audit.enabled).toBe(true)
     expect(config.audit.minimumSeverity).toBe('moderate')
+  })
+
+  test('loads minReleaseAgeDays', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({
+      minReleaseAgeDays: 7
+    }))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.minReleaseAgeDays).toBe(7)
+  })
+
+  test('defaults minReleaseAgeDays to 0 when missing', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({}))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.minReleaseAgeDays).toBe(0)
+  })
+
+  test('rejects negative minReleaseAgeDays', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({
+      minReleaseAgeDays: -5
+    }))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.minReleaseAgeDays).toBe(0)
+  })
+
+  test('rejects float minReleaseAgeDays', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({
+      minReleaseAgeDays: 3.5
+    }))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.minReleaseAgeDays).toBe(0)
+  })
+
+  test('rejects non-number minReleaseAgeDays', async () => {
+    const configPath = await writeTempConfig(JSON.stringify({
+      minReleaseAgeDays: 'three'
+    }))
+
+    const config = await loadConfig({ configPath })
+
+    expect(config.minReleaseAgeDays).toBe(0)
   })
 })
 
