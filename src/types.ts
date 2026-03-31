@@ -108,6 +108,8 @@ export interface GitHubRepo {
 export interface PackageMetadata {
   repo: GitHubRepo
   publishedVersions: string[]
+  /** Mapping of version → ISO 8601 publish timestamp from npm registry */
+  publishTimes: Record<string, string>
 }
 
 export interface VersionReleaseNote {
@@ -121,6 +123,7 @@ export interface Config {
   maxOpenPrs: number
   concurrency: number
   packageManager: 'bun' | 'npm' | 'pnpm' | 'yarn'
+  minReleaseAgeDays: number
   groups: GroupDefinition[]
   ignore: IgnoreRule[]
   audit: AuditConfig

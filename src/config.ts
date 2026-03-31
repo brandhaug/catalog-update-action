@@ -11,6 +11,7 @@ const DEFAULT_CONFIG: Config = {
   maxOpenPrs: 20,
   concurrency: 10,
   packageManager: 'bun',
+  minReleaseAgeDays: 0,
   groups: [],
   ignore: [],
   audit: DEFAULT_AUDIT_CONFIG
@@ -85,6 +86,10 @@ export async function loadConfig({ configPath }: { configPath: string }): Promis
       packageManager: VALID_PACKAGE_MANAGERS.has(raw.packageManager as string)
         ? (raw.packageManager as Config['packageManager'])
         : DEFAULT_CONFIG.packageManager,
+      minReleaseAgeDays:
+        typeof raw.minReleaseAgeDays === 'number' && Number.isInteger(raw.minReleaseAgeDays) && raw.minReleaseAgeDays >= 0
+          ? raw.minReleaseAgeDays
+          : DEFAULT_CONFIG.minReleaseAgeDays,
       groups: parseGroups({ raw: raw.groups }),
       ignore: parseIgnoreRules({ raw: raw.ignore }),
       audit: parseAuditConfig({ raw: raw.audit })
