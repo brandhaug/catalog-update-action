@@ -236,11 +236,9 @@ export async function queryPackageMetadata({
         versions?: Record<string, unknown>
         time?: Record<string, string>
       }
-      const repoUrl = data.repository?.url
-      if (!repoUrl) return
 
-      const repo = parseGitHubRepo({ url: repoUrl })
-      if (!repo) return
+      const repoUrl = data.repository?.url
+      const repo = repoUrl ? parseGitHubRepo({ url: repoUrl }) : null
 
       const publishedVersions = data.versions ? Object.keys(data.versions) : []
       const publishTimes = data.time ?? {}
@@ -284,7 +282,7 @@ export async function queryReleaseNotes({
 
   for (const candidate of candidates) {
     const metadata = packageMetadata.get(candidate.name)
-    if (!metadata) continue
+    if (!metadata?.repo) continue
     const key = repoKey(metadata.repo)
     const existing = repoToCandidates.get(key)
     if (existing) {

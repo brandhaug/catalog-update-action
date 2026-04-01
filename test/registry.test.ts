@@ -250,6 +250,26 @@ describe('filterByReleaseAge', () => {
     expect(result[0]!.name).toBe('old-pkg')
   })
 
+  test('enforces age filter when metadata has no repo (repo: null)', () => {
+    const candidates = [makeCandidate({ name: 'no-repo-pkg', latestVersion: '2.0.0' })]
+    const metadata = new Map<string, PackageMetadata>([
+      ['no-repo-pkg', {
+        repo: null,
+        publishedVersions: ['1.0.0', '2.0.0'],
+        publishTimes: { '1.0.0': '2025-01-01T00:00:00.000Z', '2.0.0': '2026-03-31T00:00:00.000Z' }
+      }]
+    ])
+
+    const result = filterByReleaseAge({
+      candidates,
+      packageMetadata: metadata,
+      minReleaseAgeDays: 3,
+      now: NOW
+    })
+
+    expect(result).toHaveLength(0)
+  })
+
   test('updates changeType when falling back to a different version', () => {
     const candidates = [makeCandidate({
       name: 'lib',

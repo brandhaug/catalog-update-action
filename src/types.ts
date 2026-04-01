@@ -114,7 +114,7 @@ export interface GitHubRepo {
 }
 
 export interface PackageMetadata {
-  repo: GitHubRepo
+  repo: GitHubRepo | null
   publishedVersions: string[]
   /** Mapping of version → ISO 8601 publish timestamp from npm registry */
   publishTimes: Record<string, string>
