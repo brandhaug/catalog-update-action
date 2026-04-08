@@ -50,7 +50,8 @@ jobs:
           git add package.json
           git commit -m "chore: release v${{ steps.version.outputs.version }}"
           git tag "v${{ steps.version.outputs.version }}"
-          git push origin master --follow-tags
+          git push origin master
+          git push origin "v${{ steps.version.outputs.version }}"
 
       - uses: actions/setup-node@v4
         with:
@@ -59,11 +60,10 @@ jobs:
 
       - run: npm publish --provenance --access public
 
-      - name: Update major version tag
+      - name: Update v1 tag
         run: |
-          MAJOR=$(echo "${{ steps.version.outputs.version }}" | cut -d. -f1)
-          git tag -f "v$MAJOR"
-          git push origin "v$MAJOR" --force
+          git tag -f v1
+          git push origin v1 --force
 
       - name: Create GitHub release
         env:
