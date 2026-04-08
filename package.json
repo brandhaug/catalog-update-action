@@ -1,6 +1,6 @@
 {
   "name": "catalog-update-action",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "description": "Automated dependency updates for Bun catalog: protocol",
   "license": "MIT",
   "author": "brandhaug",

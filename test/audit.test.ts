@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseFixedVersion, computeOverrides, buildOverridePrBody, isOverrideBranchOutdated, buildOverrideBranchUpdate, overrideKey } from '../src/audit'
+import { parseFixedVersion, computeOverrides, buildOverridePrBody, isOverrideBranchOutdated, buildOverrideBranchUpdate, overrideKey, isToolOverrideKey } from '../src/audit'
 import type { AuditAdvisory, AuditResult, OverrideEntry, Severity } from '../src/types'
 
 function makeAdvisory(overrides: Partial<AuditAdvisory> = {}): AuditAdvisory {
@@ -303,7 +303,7 @@ describe('buildOverrideBranchUpdate', () => {
     expect(result.title).toBe('fix(security): override 1 vulnerable transitive dependency in /apps/backend')
   })
 
-  test('applyChanges uses scoped keys and preserves existing', () => {
+  test('applyChanges removes stale tool overrides and preserves user overrides', () => {
     const overrides: OverrideEntry[] = [{
       packageName: 'lodash',
       vulnerableRange: '<4.17.21',
@@ -316,12 +316,30 @@ describe('buildOverrideBranchUpdate', () => {
       branchPrefix: 'catalog-update'
     })
 
-    const pkg: Record<string, unknown> = { overrides: { 'minimist@<1.2.6': '1.2.6' } }
+    const pkg: Record<string, unknown> = {
+      overrides: {
+        'minimist@<1.2.6': '1.2.6',  // stale tool override — should be removed
+        'some-package': '1.0.0'        // user override — should be preserved
+      }
+    }
     result.applyChanges(pkg)
 
     const applied = pkg.overrides as Record<string, string>
     expect(applied['lodash@<4.17.21']).toBe('4.17.21')
-    expect(applied['minimist@<1.2.6']).toBe('1.2.6')
+    expect(applied['minimist@<1.2.6']).toBeUndefined()
+    expect(applied['some-package']).toBe('1.0.0')
+  })
+
+  test('applyChanges removes overrides field when empty', () => {
+    const result = buildOverrideBranchUpdate({
+      overrides: [],
+      branchPrefix: 'catalog-update'
+    })
+
+    const pkg: Record<string, unknown> = { overrides: { 'minimist@<1.2.6': '1.2.6' } }
+    result.applyChanges(pkg)
+
+    expect(pkg.overrides).toBeUndefined()
   })
 })
 
@@ -361,5 +379,65 @@ describe('isOverrideBranchOutdated', () => {
       expectedOverrides
     })
     expect(result).toBe(true)
+  })
+
+  test('returns true when branch has extra tool-generated overrides', () => {
+    const result = isOverrideBranchOutdated({
+      branchPackageJson: {
+        overrides: {
+          'lodash@<4.17.21': '4.17.21',
+          'minimist@<1.2.6': '1.2.6'
+        }
+      },
+      expectedOverrides
+    })
+    expect(result).toBe(true)
+  })
+
+  test('returns false when branch has extra user-added overrides', () => {
+    const result = isOverrideBranchOutdated({
+      branchPackageJson: {
+        overrides: {
+          'lodash@<4.17.21': '4.17.21',
+          'some-package': '2.0.0'
+        }
+      },
+      expectedOverrides
+    })
+    expect(result).toBe(false)
+  })
+
+  test('returns false when no overrides expected and none present', () => {
+    const result = isOverrideBranchOutdated({
+      branchPackageJson: {},
+      expectedOverrides: []
+    })
+    expect(result).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// isToolOverrideKey
+// ---------------------------------------------------------------------------
+
+describe('isToolOverrideKey', () => {
+  test('returns true for tool-generated key with < bound', () => {
+    expect(isToolOverrideKey('lodash@<4.17.21')).toBe(true)
+  })
+
+  test('returns true for tool-generated key with >= bound', () => {
+    expect(isToolOverrideKey('ws@>=7.0.0 <7.5.10')).toBe(true)
+  })
+
+  test('returns false for plain package name', () => {
+    expect(isToolOverrideKey('lodash')).toBe(false)
+  })
+
+  test('returns false for scoped package without range', () => {
+    expect(isToolOverrideKey('@types/node')).toBe(false)
+  })
+
+  test('returns true for scoped package with vulnerable range', () => {
+    expect(isToolOverrideKey('@scope/pkg@<2.0.0')).toBe(true)
   })
 })

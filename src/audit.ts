@@ -95,6 +95,17 @@ export function overrideKey(entry: Pick<OverrideEntry, 'packageName' | 'vulnerab
   return `${entry.packageName}@${entry.vulnerableRange}`
 }
 
+/**
+ * Returns true if the key matches the tool-generated format `name@<range>`.
+ * User-added overrides use plain package names (e.g. `some-package`), while
+ * tool-generated keys always contain `@` followed by a semver comparator.
+ * Note: a user override manually written as `pkg@<range>` would be treated
+ * as tool-generated and subject to cleanup.
+ */
+export function isToolOverrideKey(key: string): boolean {
+  return /^.+@[<>=]/.test(key)
+}
+
 // ---------------------------------------------------------------------------
 // Compute overrides from audit results
 // ---------------------------------------------------------------------------
@@ -234,11 +245,25 @@ export function buildOverrideBranchUpdate({
     deleteLockfile: true,
     applyChanges: (packageJson: Record<string, unknown>) => {
       const current = (packageJson.overrides as Record<string, string> | undefined) ?? {}
-      const merged = { ...current }
-      for (const entry of overrides) {
-        merged[overrideKey(entry)] = entry.fixedVersion
+      const result: Record<string, string> = {}
+
+      // Preserve user-added overrides (non-tool keys)
+      for (const [key, value] of Object.entries(current)) {
+        if (!isToolOverrideKey(key)) {
+          result[key] = value
+        }
       }
-      packageJson.overrides = merged
+
+      // Add currently needed tool overrides
+      for (const entry of overrides) {
+        result[overrideKey(entry)] = entry.fixedVersion
+      }
+
+      if (Object.keys(result).length > 0) {
+        packageJson.overrides = result
+      } else {
+        delete packageJson.overrides
+      }
     }
   }
 }
@@ -255,10 +280,17 @@ export function isOverrideBranchOutdated({
   expectedOverrides: OverrideEntry[]
 }): boolean {
   const overrides = branchPackageJson.overrides as Record<string, string> | undefined
-  if (!overrides) return true
+  if (!overrides) return expectedOverrides.length > 0
 
+  // Check all expected overrides are present with correct versions
   for (const entry of expectedOverrides) {
     if (overrides[overrideKey(entry)] !== entry.fixedVersion) return true
+  }
+
+  // Check for stale tool-generated overrides that are no longer needed
+  const expectedKeys = new Set(expectedOverrides.map((e) => overrideKey(e)))
+  for (const key of Object.keys(overrides)) {
+    if (isToolOverrideKey(key) && !expectedKeys.has(key)) return true
   }
 
   return false
