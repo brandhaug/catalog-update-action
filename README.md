@@ -11,7 +11,8 @@ Dependabot doesn't understand Bun's `catalog:` protocol — it can't update the 
 
 ### Features
 
-- Reads the `catalog` field from your root `package.json`
+- Reads the `catalog` field from `package.json`, extracting package names and current versions
+- Auto-discovers multiple catalog directories in monorepos
 - Queries npm for the latest stable versions (skips pre-releases)
 - Groups updates into batches based on configurable patterns (similar to Dependabot groups)
 - Creates and syncs PRs via the GitHub CLI — closes stale ones, rebuilds conflicting ones
@@ -80,9 +81,10 @@ jobs:
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `config` | `.catalog-updaterc.json` | Path to the config file |
+| `config` | `.catalog-updaterc.json` | Path to the config file (relative to each discovered directory) |
 | `dry-run` | `false` | Preview updates without creating PRs |
 | `token` | `github.token` | GitHub token for creating PRs. Use a PAT or GitHub App token to trigger downstream workflows |
+| `exclude-directories` | `''` | Comma-separated directories to exclude from catalog discovery (supports glob patterns) |
 
 ### CLI
 
@@ -112,6 +114,27 @@ catalog-update -c path/to/.catalog-updaterc.json
 | `--version` | `-v` | Show version and exit |
 | `--dry-run` | `-d` | Preview updates without creating PRs |
 | `--config <path>` | `-c` | Path to config file (default: `.catalog-updaterc.json`) |
+| `--exclude <dirs>` | `-e` | Comma-separated directories to exclude from catalog discovery (supports glob patterns) |
+
+## Multi-Directory Support
+
+The action automatically discovers all directories containing a `package.json` with a `catalog` field — not just the repo root. This is useful for monorepos that maintain separate catalogs in subdirectories.
+
+Each discovered directory is processed independently with its own config file, and PR branches are namespaced by directory (e.g., `catalog-update/apps/web/react`).
+
+To exclude directories from discovery:
+
+```yaml
+# GitHub Action
+- uses: brandhaug/catalog-update-action@v1
+  with:
+    exclude-directories: 'apps/legacy,packages/deprecated-*'
+```
+
+```bash
+# CLI
+catalog-update --exclude "apps/legacy,packages/deprecated-*"
+```
 
 ## Configuration
 
@@ -239,13 +262,14 @@ The override PR is created with security priority (before catalog PRs) and share
 
 ## How It Works
 
-1. **Parse** — Reads the `catalog` field from root `package.json`, extracting package names and current versions (supports `^` ranges and `npm:` aliases)
-2. **Query** — Fetches latest stable versions from the npm registry (skips pre-releases)
-3. **Filter** — Applies ignore rules, classifies updates as major/minor/patch, and enforces minimum release age (if configured)
-4. **Group** — Assigns updates to configured groups; unmatched packages get individual PRs
-5. **Audit** — If audit is enabled, runs `bun audit --json` to find vulnerable transitive dependencies and computes required overrides
-6. **Sync** — For existing PRs: closes stale ones, rebuilds conflicting or outdated ones
-7. **Create** — Creates new PRs (override PR first for security priority, then catalog PRs), respecting the `maxOpenPrs` limit
+1. **Discover** — Scans the repository for all directories containing a `package.json` with a `catalog` field
+2. **Parse** — Reads the `catalog` field from each `package.json`, extracting package names and current versions (supports `^` ranges and `npm:` aliases)
+3. **Query** — Fetches latest stable versions from the npm registry (skips pre-releases)
+4. **Filter** — Applies ignore rules, classifies updates as major/minor/patch, and enforces minimum release age (if configured)
+5. **Group** — Assigns updates to configured groups; unmatched packages get individual PRs
+6. **Audit** — If audit is enabled, runs `bun audit --json` to find vulnerable transitive dependencies and computes required overrides
+7. **Sync** — For existing PRs: closes stale ones, rebuilds conflicting or outdated ones
+8. **Create** — Creates new PRs (override PR first for security priority, then catalog PRs), respecting the `maxOpenPrs` limit
 
 Each catalog PR includes:
 - A table of all updated packages with version changes
@@ -264,6 +288,8 @@ git clone https://github.com/brandhaug/catalog-update-action.git
 cd catalog-update-action
 bun install
 bun test
+bun run lint    # oxlint
+bun run fmt     # oxfmt
 ```
 
 ## License

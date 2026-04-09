@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+set -e
+
+echo "Running formatter check..."
+bunx oxfmt --check src/
+
+echo "Running linter..."
+bunx oxlint --type-aware src/

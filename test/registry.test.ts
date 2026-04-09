@@ -9,7 +9,7 @@ function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string; lat
     raw: overrides.latestVersion,
     npmName: overrides.name,
     currentVersion: '1.0.0',
-    hasCaret: false,
+    rangePrefix: "",
     isAlias: false,
     aliasName: null,
     changeType: 'minor',
