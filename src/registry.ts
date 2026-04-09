@@ -124,7 +124,7 @@ export function getVersionAgeDays({
 	now: Date
 }): number | null {
 	const publishDate = new Date(publishTime)
-	if (isNaN(publishDate.getTime())) return null
+	if (Number.isNaN(publishDate.getTime())) return null
 	return (now.getTime() - publishDate.getTime()) / (1000 * 60 * 60 * 24)
 }
 
@@ -451,7 +451,7 @@ export function formatReleaseNotes({
 	updates: UpdateCandidate[]
 	releaseNotes: Map<string, VersionReleaseNote[]>
 }): string[] {
-	const sorted = [...updates].sort((a, b) => a.name.localeCompare(b.name))
+	const sorted = [...updates].toSorted((a, b) => a.name.localeCompare(b.name))
 	const notesEntries = sorted.filter((u) => releaseNotes.has(u.name))
 
 	if (notesEntries.length === 0) return []

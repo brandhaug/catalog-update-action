@@ -44,5 +44,5 @@ export async function discoverCatalogDirectories({
 		}
 	}
 
-	return directories.sort()
+	return directories.toSorted()
 }

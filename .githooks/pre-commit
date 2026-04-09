@@ -3,9 +3,9 @@
 set -e
 
 echo "Running formatter..."
-bunx oxfmt --write src/
+npx oxfmt --write src/
 git add -u src/
 
 echo "Running linter..."
-bunx oxlint --fix --type-aware src/
+npx oxlint --fix --type-aware src/
 git add -u src/

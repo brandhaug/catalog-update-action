@@ -169,7 +169,7 @@ export function getIntermediateVersions({
 				compareSemver({ a: v, b: latestVersion }) <= 0
 			)
 		})
-		.sort((a, b) => compareSemver({ a: b, b: a }))
+		.toSorted((a, b) => compareSemver({ a: b, b: a }))
 		.slice(0, maxVersions)
 
 	if (intermediate.length === 0) return [latestVersion]

@@ -209,7 +209,7 @@ export function buildOverridePrBody({
 }: {
 	overrides: OverrideEntry[]
 }): string {
-	const sorted = [...overrides].sort(
+	const sorted = [...overrides].toSorted(
 		(a, b) =>
 			a.packageName.localeCompare(b.packageName) ||
 			a.vulnerableRange.localeCompare(b.vulnerableRange)

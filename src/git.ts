@@ -91,7 +91,7 @@ export function buildCatalogPrBody({
 	updates: UpdateCandidate[]
 	releaseNotes: Map<string, VersionReleaseNote[]>
 }): string {
-	const sorted = [...updates].sort((a, b) => a.name.localeCompare(b.name))
+	const sorted = [...updates].toSorted((a, b) => a.name.localeCompare(b.name))
 
 	const lines = [
 		'## Dependency Updates',
