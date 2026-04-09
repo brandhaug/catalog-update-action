@@ -12,7 +12,6 @@ GitHub Action and CLI tool that automates dependency updates for Bun's `catalog:
 
 ```sh
 bun install          # Install dependencies
-bun run prepare      # Configure git hooks path (.githooks/)
 ```
 
 ## Development Workflow
@@ -42,42 +41,11 @@ bun run fmt          # Format with oxfmt (src/)
 bun run fmt:check    # Check formatting without modifying
 ```
 
-Pre-commit hook (`.githooks/pre-commit`) auto-runs `oxfmt --write` and `oxlint --fix` on staged files.
-
-## Code Style
-
-- Tabs for indentation, single quotes, no semicolons, trailing comma: none
-- Strict TypeScript: `noUncheckedIndexedAccess`, `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns`
-- Oxlint rules: no-param-reassign (error), no-else-return (error), prefer-as-const, no-inferrable-types
-
-## CI Pipeline
-
-Runs on PRs to `master` (`.github/workflows/ci.yml`):
-
-1. `bun install`
-2. `bun run lint`
-3. `bun run fmt:check`
-4. `bun test`
-
-All four must pass before merge.
-
-## Release
-
-Uses **Release Please** on push to `master` (`.github/workflows/release.yml`). Publishes to npm with provenance. Updates `v1` tag for GitHub Action consumers.
-
-## PR Guidelines
-
-- All PRs target `master`
-- Run `bun run lint`, `bun run fmt:check`, and `bun test` before pushing
-- Commit messages follow conventional commits (Release Please requirement)
-
 ## Project Structure
 
 ```
 src/           # TypeScript source (entry: main.ts)
 test/          # Tests (bun:test, mirrors src/ names)
-.githooks/     # Pre-commit hook (oxfmt + oxlint)
-.github/       # CI and release workflows
 action.yml     # GitHub Action definition
 schema.json    # JSON Schema for .catalog-updaterc.json
 ```
