@@ -2,8 +2,10 @@
 
 set -e
 
-echo "Running formatter check..."
-bunx oxfmt --check src/
+echo "Running formatter..."
+bunx oxfmt --write src/
+git add -u src/
 
 echo "Running linter..."
-bunx oxlint --type-aware src/
+bunx oxlint --fix --type-aware src/
+git add -u src/
