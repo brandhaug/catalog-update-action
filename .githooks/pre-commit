@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+set -e
+
+echo "Running formatter..."
+npx oxfmt --write src/
+git add -u src/
+
+echo "Running linter..."
+npx oxlint --fix --type-aware src/
+git add -u src/

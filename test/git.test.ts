@@ -9,7 +9,7 @@ function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): 
     currentVersion: '1.0.0',
     latestVersion: '2.0.0',
     changeType: 'major',
-    hasCaret: false,
+    rangePrefix: "",
     isAlias: false,
     aliasName: null,
     ...overrides
@@ -41,9 +41,16 @@ describe('buildCatalogValue', () => {
 
   test('returns caret version', () => {
     const result = buildCatalogValue({
-      update: makeCandidate({ name: 'react', latestVersion: '19.1.0', hasCaret: true })
+      update: makeCandidate({ name: 'react', latestVersion: '19.1.0', rangePrefix: "^" })
     })
     expect(result).toBe('^19.1.0')
+  })
+
+  test('returns tilde version', () => {
+    const result = buildCatalogValue({
+      update: makeCandidate({ name: 'lodash', latestVersion: '4.18.0', rangePrefix: "~" })
+    })
+    expect(result).toBe('~4.18.0')
   })
 
   test('returns npm: alias format', () => {
@@ -56,6 +63,19 @@ describe('buildCatalogValue', () => {
       })
     })
     expect(result).toBe('npm:rolldown-vite@7.4.0')
+  })
+
+  test('returns npm: alias format with caret', () => {
+    const result = buildCatalogValue({
+      update: makeCandidate({
+        name: 'vite',
+        latestVersion: '7.4.0',
+        isAlias: true,
+        aliasName: 'rolldown-vite',
+        rangePrefix: "^"
+      })
+    })
+    expect(result).toBe('npm:rolldown-vite@^7.4.0')
   })
 })
 

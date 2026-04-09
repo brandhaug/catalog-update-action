@@ -8,7 +8,7 @@ function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string; cha
     npmName: overrides.name,
     currentVersion: '1.0.0',
     latestVersion: '2.0.0',
-    hasCaret: false,
+    rangePrefix: "",
     isAlias: false,
     aliasName: null,
     ...overrides
