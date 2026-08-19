@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.10.0...catalog-update-action-v0.11.0) (2026-08-19)
+
+
+### Features
+
+* **auto-merge:** enable GitHub auto-merge on created and rebuilt PRs ([#8](https://github.com/brandhaug/catalog-update-action/issues/8)) ([b6543cd](https://github.com/brandhaug/catalog-update-action/commit/b6543cd2ebf5dadde57b3e5671fecd6011fb15f5))
+
 ## [0.10.0](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.9.0...catalog-update-action-v0.10.0) (2026-04-09)
 
 
