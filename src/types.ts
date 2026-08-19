@@ -130,6 +130,17 @@ export interface VersionReleaseNote {
 	body: string
 }
 
+export type MergeMethod = 'squash' | 'merge' | 'rebase'
+
+export interface AutoMergeConfig {
+	enabled: boolean
+	mergeMethod: MergeMethod
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
 export interface Config {
 	branchPrefix: string
 	defaultBranch: string
@@ -140,4 +151,5 @@ export interface Config {
 	groups: GroupDefinition[]
 	ignore: IgnoreRule[]
 	audit: AuditConfig
+	autoMerge: AutoMergeConfig
 }

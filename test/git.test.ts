@@ -22,9 +22,11 @@ const baseConfig: Config = {
   maxOpenPrs: 20,
   concurrency: 10,
   packageManager: 'bun',
+  minReleaseAgeDays: 0,
   groups: [],
   ignore: [],
-  audit: { enabled: true, minimumSeverity: 'moderate' }
+  audit: { enabled: true, minimumSeverity: 'moderate' },
+  autoMerge: { enabled: false, mergeMethod: 'squash' }
 }
 
 // ---------------------------------------------------------------------------

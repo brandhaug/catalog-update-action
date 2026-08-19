@@ -19,6 +19,7 @@ Dependabot doesn't understand Bun's `catalog:` protocol — it can't update the 
 - Includes release notes from GitHub Releases in PR descriptions
 - Supports `^` ranges and `npm:` aliases
 - Detects vulnerable transitive dependencies via `bun audit` and creates override PRs
+- Optionally turns on GitHub auto-merge, so passing updates land without a manual click
 - Runs as a GitHub Action or standalone CLI
 
 ## Prerequisites
@@ -180,6 +181,7 @@ Create a `.catalog-updaterc.json` in your repository root:
 | `groups` | `array` | `[]` | Dependency grouping rules (see below) |
 | `ignore` | `array` | `[]` | Dependency ignore rules (see below) |
 | `audit` | `object` | `{}` | Transitive vulnerability audit settings (see below) |
+| `autoMerge` | `object` | `{}` | GitHub auto-merge settings (see below) |
 
 ### Groups
 
@@ -259,6 +261,38 @@ To disable the audit entirely:
 ```
 
 The override PR is created with security priority (before catalog PRs) and shares the same `maxOpenPrs` budget. Direct catalog dependencies are excluded from overrides since they are handled by the catalog update pipeline.
+
+### Auto-merge
+
+When enabled, the action turns on [GitHub auto-merge](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/automatically-merging-a-pull-request) for each PR it opens or rebuilds. GitHub then merges the PR once the required status checks on the base branch pass, and leaves it open if they fail.
+
+- **`enabled`** — Turn auto-merge on for created and rebuilt PRs (default: `false`)
+- **`mergeMethod`** — `"squash"`, `"merge"` or `"rebase"` (default: `"squash"`). The method must be enabled for the repository.
+
+```json
+{
+  "minReleaseAgeDays": 3,
+  "autoMerge": {
+    "enabled": true,
+    "mergeMethod": "squash"
+  }
+}
+```
+
+Two repository settings are required:
+
+1. **Allow auto-merge** under Settings > General > Pull Requests.
+2. **Required status checks** on the base branch, via a ruleset or branch protection. Without them auto-merge has nothing to wait for, GitHub refuses to arm it, and the action reports why.
+
+The token needs `pull-requests: write` and `contents: write`, which it already needs to open PRs.
+
+#### Notes on safety
+
+Auto-merge means dependency changes reach your default branch with no human read. Some things worth knowing:
+
+- Set `minReleaseAgeDays` as well. Otherwise a version published minutes ago can merge the same day, which is the window a compromised release depends on. The action warns when `autoMerge` is on and the age is `0`.
+- PRs that carry non-bot commits are skipped, so pushing to a branch yourself takes it out of auto-merge handling.
+- The action arms auto-merge because it opened the PR. Doing the same from a `pull_request` workflow in your own repo means matching PRs by branch name, and any branch name is available to anyone with push access.
 
 ## How It Works
 

@@ -116,6 +116,24 @@
           "description": "Minimum severity level to create overrides for"
         }
       }
+    },
+    "autoMerge": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "GitHub auto-merge for the PRs this action opens. Requires \"Allow auto-merge\" in repository settings, and required status checks on the base branch for auto-merge to have something to wait for.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable auto-merge on created and rebuilt PRs. Pair with minReleaseAgeDays so new releases are quarantined before they merge unreviewed."
+        },
+        "mergeMethod": {
+          "type": "string",
+          "enum": ["squash", "merge", "rebase"],
+          "default": "squash",
+          "description": "Merge method used when auto-merge fires. Must be enabled for the repository."
+        }
+      }
     }
   }
 }

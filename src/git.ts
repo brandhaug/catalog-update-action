@@ -450,6 +450,70 @@ export async function updateBranch({
 	return { success: true }
 }
 
+// ---------------------------------------------------------------------------
+// Auto-merge
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns on GitHub auto-merge for a PR this run owns.
+ *
+ * Enabling it here rather than from a `pull_request` workflow in the consumer
+ * repo matters: this process created the PR, so it merges on that basis. A
+ * workflow can only recognise the PR by branch name, and any name is available
+ * to anyone with push access.
+ *
+ * Auto-merge waits for the required status checks on the base branch. Without
+ * such checks there is nothing to wait for, so GitHub refuses to arm it. A
+ * failure here is never fatal, because the PR is already open.
+ */
+export async function enableAutoMerge({
+	prRef,
+	config,
+	dir
+}: {
+	prRef: string
+	config: Config
+	dir: DirectoryContext
+}): Promise<boolean> {
+	const result = await exec({
+		command: [
+			'gh',
+			'pr',
+			'merge',
+			prRef,
+			'--auto',
+			`--${config.autoMerge.mergeMethod}`
+		],
+		cwd: dir.cwd
+	})
+
+	if (result.exitCode === 0) {
+		console.log(`  Auto-merge enabled (${config.autoMerge.mergeMethod})`)
+		return true
+	}
+
+	console.warn(`  Warning: could not enable auto-merge for ${prRef}`)
+
+	if (result.stderr.includes('Auto-merge is not allowed')) {
+		console.warn(
+			'  Enable "Allow auto-merge" in repository Settings > General > Pull Requests.'
+		)
+	} else if (result.stderr.includes('clean status')) {
+		console.warn(
+			`  Nothing blocks this PR, so auto-merge has nothing to wait for. Add required status checks to "${config.defaultBranch}", otherwise autoMerge lands updates unchecked.`
+		)
+	} else if (
+		result.stderr.includes('merging is not allowed') ||
+		result.stderr.includes('Merge commits are not allowed')
+	) {
+		console.warn(
+			`  The "${config.autoMerge.mergeMethod}" merge method is disabled for this repository. Allow it, or pick another autoMerge.mergeMethod.`
+		)
+	}
+
+	return false
+}
+
 export async function createPr({
 	branchUpdate,
 	config,
@@ -483,6 +547,13 @@ export async function createPr({
 
 	if (prResult.exitCode === 0) {
 		console.log(`  PR created: ${prResult.stdout}`)
+		if (config.autoMerge.enabled) {
+			// gh prints the new PR's URL, which beats a second branch lookup.
+			const prRef = prResult.stdout.startsWith('https://')
+				? prResult.stdout
+				: branchUpdate.branch
+			await enableAutoMerge({ prRef, config, dir })
+		}
 	} else {
 		console.error(`  Failed to create PR for branch "${branchUpdate.branch}"`)
 		if (
@@ -585,6 +656,11 @@ export async function syncExistingPrs({
 
 		if (!isConflicting && !behindDefault && !hasContentChanges) {
 			console.log(`  PR #${pr.number} (${pr.headRefName}) is up to date`)
+			// Re-arm rather than skip: this picks up PRs opened before autoMerge
+			// was turned on, and retries any earlier attempt that failed.
+			if (config.autoMerge.enabled) {
+				await enableAutoMerge({ prRef: String(pr.number), config, dir })
+			}
 			continue
 		}
 
@@ -622,6 +698,11 @@ export async function syncExistingPrs({
 				console.warn(
 					`  Warning: Failed to update title/body for PR #${pr.number}, but branch was rebuilt`
 				)
+			}
+
+			// The rebuild force-pushes the branch, so arm the PR again.
+			if (config.autoMerge.enabled) {
+				await enableAutoMerge({ prRef: String(pr.number), config, dir })
 			}
 
 			console.log(`  Successfully rebuilt PR #${pr.number} (${pr.headRefName})`)

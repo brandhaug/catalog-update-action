@@ -3,6 +3,8 @@ import type {
 	GroupDefinition,
 	IgnoreRule,
 	AuditConfig,
+	AutoMergeConfig,
+	MergeMethod,
 	Severity,
 	SemverChange
 } from './types'
@@ -10,6 +12,11 @@ import type {
 const DEFAULT_AUDIT_CONFIG: AuditConfig = {
 	enabled: true,
 	minimumSeverity: 'moderate'
+}
+
+const DEFAULT_AUTO_MERGE_CONFIG: AutoMergeConfig = {
+	enabled: false,
+	mergeMethod: 'squash'
 }
 
 const DEFAULT_CONFIG: Config = {
@@ -21,7 +28,8 @@ const DEFAULT_CONFIG: Config = {
 	minReleaseAgeDays: 0,
 	groups: [],
 	ignore: [],
-	audit: DEFAULT_AUDIT_CONFIG
+	audit: DEFAULT_AUDIT_CONFIG,
+	autoMerge: DEFAULT_AUTO_MERGE_CONFIG
 }
 
 const VALID_PACKAGE_MANAGERS = new Set(['bun', 'npm', 'pnpm', 'yarn'])
@@ -32,6 +40,7 @@ const VALID_UPDATE_TYPES = new Set<SemverChange>([
 	'prerelease',
 	'release'
 ])
+const VALID_MERGE_METHODS = new Set<MergeMethod>(['squash', 'merge', 'rebase'])
 const VALID_SEVERITIES = new Set<Severity>([
 	'info',
 	'low',
@@ -82,6 +91,25 @@ export function parseAuditConfig({ raw }: { raw: unknown }): AuditConfig {
 	}
 }
 
+export function parseAutoMergeConfig({
+	raw
+}: {
+	raw: unknown
+}): AutoMergeConfig {
+	if (!raw || typeof raw !== 'object') return DEFAULT_AUTO_MERGE_CONFIG
+
+	const obj = raw as Record<string, unknown>
+	return {
+		enabled:
+			typeof obj.enabled === 'boolean'
+				? obj.enabled
+				: DEFAULT_AUTO_MERGE_CONFIG.enabled,
+		mergeMethod: VALID_MERGE_METHODS.has(obj.mergeMethod as MergeMethod)
+			? (obj.mergeMethod as MergeMethod)
+			: DEFAULT_AUTO_MERGE_CONFIG.mergeMethod
+	}
+}
+
 function parseIgnoreRules({ raw }: { raw: unknown }): IgnoreRule[] {
 	if (!Array.isArray(raw)) return []
 
@@ -112,7 +140,7 @@ export async function loadConfig({
 
 		const raw = (await file.json()) as Record<string, unknown>
 
-		return {
+		const config: Config = {
 			branchPrefix:
 				typeof raw.branchPrefix === 'string'
 					? raw.branchPrefix
@@ -140,8 +168,19 @@ export async function loadConfig({
 					: DEFAULT_CONFIG.minReleaseAgeDays,
 			groups: parseGroups({ raw: raw.groups }),
 			ignore: parseIgnoreRules({ raw: raw.ignore }),
-			audit: parseAuditConfig({ raw: raw.audit })
+			audit: parseAuditConfig({ raw: raw.audit }),
+			autoMerge: parseAutoMergeConfig({ raw: raw.autoMerge })
 		}
+
+		// Unattended merges plus a zero-day-old release means a compromised
+		// version can reach the default branch before anyone reads the diff.
+		if (config.autoMerge.enabled && config.minReleaseAgeDays === 0) {
+			console.warn(
+				'Warning: autoMerge is enabled with minReleaseAgeDays: 0. Freshly published versions will merge without review. Set minReleaseAgeDays to quarantine new releases.'
+			)
+		}
+
+		return config
 	} catch (error) {
 		console.error(`Failed to load config from ${configPath}:`, error)
 		return DEFAULT_CONFIG

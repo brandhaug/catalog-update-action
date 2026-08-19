@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { loadConfig, parseAuditConfig } from '../src/config'
+import { loadConfig, parseAuditConfig, parseAutoMergeConfig } from '../src/config'
 import { join } from 'node:path'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -208,6 +208,35 @@ describe('loadConfig', () => {
     const config = await loadConfig({ configPath })
 
     expect(config.minReleaseAgeDays).toBe(0)
+  })
+})
+
+describe('parseAutoMergeConfig', () => {
+  test('defaults to disabled with squash', () => {
+    expect(parseAutoMergeConfig({ raw: null })).toEqual({ enabled: false, mergeMethod: 'squash' })
+    expect(parseAutoMergeConfig({ raw: undefined })).toEqual({ enabled: false, mergeMethod: 'squash' })
+    expect(parseAutoMergeConfig({ raw: 'string' })).toEqual({ enabled: false, mergeMethod: 'squash' })
+  })
+
+  test('parses a valid config', () => {
+    expect(parseAutoMergeConfig({ raw: { enabled: true, mergeMethod: 'rebase' } })).toEqual({
+      enabled: true,
+      mergeMethod: 'rebase'
+    })
+  })
+
+  test('falls back to squash for an unknown merge method', () => {
+    expect(parseAutoMergeConfig({ raw: { enabled: true, mergeMethod: 'fast-forward' } })).toEqual({
+      enabled: true,
+      mergeMethod: 'squash'
+    })
+  })
+
+  test('ignores a non-boolean enabled', () => {
+    expect(parseAutoMergeConfig({ raw: { enabled: 'yes' } })).toEqual({
+      enabled: false,
+      mergeMethod: 'squash'
+    })
   })
 })
 
