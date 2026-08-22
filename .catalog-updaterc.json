@@ -9,5 +9,10 @@
     { "name": "vite", "patterns": ["vite", "vitest", "@vitejs/*", "@vitest/*"] },
     { "name": "all-patch-updates", "patterns": ["*"], "updateTypes": ["patch"] }
   ],
-  "ignore": []
+  "ignore": [],
+  "minReleaseAgeDays": 3,
+  "autoMerge": {
+    "enabled": true,
+    "mergeMethod": "squash"
+  }
 }
