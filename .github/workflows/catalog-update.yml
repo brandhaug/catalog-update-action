@@ -23,4 +23,4 @@ jobs:
       - uses: ./
         with:
           config: '.catalog-updaterc.json'
-          token: ${{ secrets.CATALOG_UPDATE_TOKEN }}
+          token: ${{ secrets.CI_PAT }}
