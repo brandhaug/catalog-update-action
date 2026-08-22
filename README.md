@@ -86,6 +86,7 @@ jobs:
 | `dry-run` | `false` | Preview updates without creating PRs |
 | `token` | `github.token` | GitHub token for creating PRs. Use a PAT or GitHub App token to trigger downstream workflows |
 | `exclude-directories` | `''` | Comma-separated directories to exclude from catalog discovery (supports glob patterns) |
+| `bun-version` | `1.4.0` | Bun version used to resolve and install dependencies. Match your project's Bun version — Bun 1.4+ writes a lockfile format unreadable by Bun <= 1.3 |
 
 ### CLI
 
