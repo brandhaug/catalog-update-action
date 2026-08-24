@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.11.0...catalog-update-action-v0.12.0) (2026-08-24)
+
+
+### Features
+
+* upgrade to Bun 1.4 and add configurable bun-version input ([#10](https://github.com/brandhaug/catalog-update-action/issues/10)) ([75f3705](https://github.com/brandhaug/catalog-update-action/commit/75f37056fea3d5fdf3bd082cf5c6417f93f55d8a))
+
 ## [0.11.0](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.10.0...catalog-update-action-v0.11.0) (2026-08-19)
 
 
