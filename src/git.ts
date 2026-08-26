@@ -12,8 +12,8 @@ import { formatReleaseNotes } from './registry'
 import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
 import {
 	packageJsonSchema,
-	type PackageJson,
-	stringRecordSchema
+	readStringRecord,
+	type PackageJson
 } from './schemas'
 
 // ---------------------------------------------------------------------------
@@ -52,55 +52,15 @@ export async function exec({
 // Install command
 // ---------------------------------------------------------------------------
 
-function getInstallCommand({
-	packageManager
-}: {
-	packageManager: Config['packageManager']
-}): string[] {
-	switch (packageManager) {
-		case 'bun': {
-			return ['bun', 'install']
-		}
-		case 'npm': {
-			return ['npm', 'install']
-		}
-		case 'pnpm': {
-			return ['pnpm', 'install']
-		}
-		case 'yarn': {
-			return ['yarn', 'install']
-		}
-		default: {
-			// Unreachable while packageManager stays a closed union, but the
-			// switch must fail loudly if a new manager is ever added.
-			throw new Error('Unknown package manager')
-		}
-	}
-}
-
-function getLockfileName({
-	packageManager
-}: {
-	packageManager: Config['packageManager']
-}): string {
-	switch (packageManager) {
-		case 'bun': {
-			return 'bun.lock'
-		}
-		case 'npm': {
-			return 'package-lock.json'
-		}
-		case 'pnpm': {
-			return 'pnpm-lock.yaml'
-		}
-		case 'yarn': {
-			return 'yarn.lock'
-		}
-		default: {
-			throw new Error('Unknown package manager')
-		}
-	}
-}
+const PACKAGE_MANAGERS = {
+	bun: { install: ['bun', 'install'], lockfile: 'bun.lock' },
+	npm: { install: ['npm', 'install'], lockfile: 'package-lock.json' },
+	pnpm: { install: ['pnpm', 'install'], lockfile: 'pnpm-lock.yaml' },
+	yarn: { install: ['yarn', 'install'], lockfile: 'yarn.lock' }
+} satisfies Record<
+	Config['packageManager'],
+	{ install: string[]; lockfile: string }
+>
 
 // ---------------------------------------------------------------------------
 // Catalog PR body
@@ -176,11 +136,10 @@ export function buildCatalogBranchUpdate({
 		title,
 		body,
 		applyChanges: (packageJson) => {
-			const parsed = stringRecordSchema.safeParse(packageJson.catalog)
-			if (!parsed.success) {
+			const catalog = readStringRecord(packageJson.catalog)
+			if (!catalog) {
 				throw new Error(`No valid catalog found in package.json`)
 			}
-			const catalog = parsed.data
 			for (const update of updates) {
 				catalog[update.name] = buildCatalogValue({ update })
 			}
@@ -410,14 +369,20 @@ export async function updateBranch({
 	})
 	if (checkoutResult.exitCode !== 0) return { success: false }
 
+	// Roll back to the default branch after any mid-pipeline failure so the
+	// next group isn't processed from a half-built branch state.
+	const fail = async (message: string): Promise<{ success: false }> => {
+		console.error(message)
+		await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
+		return { success: false }
+	}
+
 	const packageJson = await Bun.file(packageJsonPath).json()
 
 	try {
 		applyChanges(packageJson)
 	} catch (error: unknown) {
-		console.error(`  ${String(error)}`)
-		await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
-		return { success: false }
+		return fail(`  ${String(error)}`)
 	}
 
 	await Bun.write(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
@@ -425,9 +390,7 @@ export async function updateBranch({
 	// Bun's @range override syntax is ignored for already-locked packages.
 	// Deleting the lockfile forces a full re-resolution so overrides apply.
 	if (deleteLockfile) {
-		const lockfileName = getLockfileName({
-			packageManager: config.packageManager
-		})
+		const lockfileName = PACKAGE_MANAGERS[config.packageManager].lockfile
 		const lockfilePath = `${workDir}/${lockfileName}`
 		const exists = await Bun.file(lockfilePath).exists()
 		if (exists) {
@@ -440,13 +403,11 @@ export async function updateBranch({
 
 	console.log('  Running install...')
 	const installResult = await exec({
-		command: getInstallCommand({ packageManager: config.packageManager }),
+		command: PACKAGE_MANAGERS[config.packageManager].install,
 		cwd: workDir
 	})
 	if (installResult.exitCode !== 0) {
-		console.error(`  Failed to run install for branch "${branch}"`)
-		await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
-		return { success: false }
+		return fail(`  Failed to run install for branch "${branch}"`)
 	}
 
 	const { stdout: diffOutput } = await exec({
@@ -482,9 +443,7 @@ export async function updateBranch({
 		cwd
 	})
 	if (commitResult.exitCode !== 0) {
-		console.error(`  Failed to commit for branch "${branch}"`)
-		await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
-		return { success: false }
+		return fail(`  Failed to commit for branch "${branch}"`)
 	}
 
 	const pushResult = await exec({
@@ -492,9 +451,7 @@ export async function updateBranch({
 		cwd
 	})
 	if (pushResult.exitCode !== 0) {
-		console.error(`  Failed to push branch "${branch}"`)
-		await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
-		return { success: false }
+		return fail(`  Failed to push branch "${branch}"`)
 	}
 
 	await returnToDefault({ defaultBranch: config.defaultBranch, cwd })

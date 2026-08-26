@@ -70,6 +70,22 @@ async function fetchWithRetry(
 	throw lastError
 }
 
+/**
+ * Run a task under the semaphore, guaranteeing the permit is released. Errors
+ * propagate to the caller, which decides whether to swallow or log them.
+ */
+async function withSemaphore<T>(
+	semaphore: Semaphore,
+	task: () => Promise<T>
+): Promise<T> {
+	await semaphore.acquire()
+	try {
+		return await task()
+	} finally {
+		semaphore.release()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // npm registry
 // ---------------------------------------------------------------------------
@@ -85,51 +101,54 @@ export async function queryNpmRegistry({
 	const results = new Map<string, string>()
 
 	const tasks = entries.map(async (entry) => {
-		await semaphore.acquire()
 		try {
-			const encodedName = entry.npmName.replace('/', '%2f')
-			const response = await fetchWithRetry(
-				`https://registry.npmjs.org/${encodedName}`,
-				{
-					headers: { Accept: 'application/vnd.npm.install-v1+json' },
-					signal: AbortSignal.timeout(15_000)
-				}
-			)
-
-			if (!response.ok) {
-				console.warn(
-					`  Warning: Failed to fetch ${entry.npmName} (${response.status})`
+			await withSemaphore(semaphore, async () => {
+				const encodedName = entry.npmName.replace('/', '%2f')
+				const response = await fetchWithRetry(
+					`https://registry.npmjs.org/${encodedName}`,
+					{
+						headers: { Accept: 'application/vnd.npm.install-v1+json' },
+						signal: AbortSignal.timeout(15_000)
+					}
 				)
-				return
-			}
 
-			const parsed = npmRegistryResponseSchema.safeParse(await response.json())
-			if (!parsed.success) return
-			const data = parsed.data
+				if (!response.ok) {
+					console.warn(
+						`  Warning: Failed to fetch ${entry.npmName} (${response.status})`
+					)
+					return
+				}
 
-			if (parseSemver({ version: entry.currentVersion })?.prerelease) {
-				// Prerelease entry: find highest version from all published versions
-				const allVersions = data.versions ? Object.keys(data.versions) : []
-				let best: string | null = null
-				for (const v of allVersions) {
-					if (!parseSemver({ version: v })) continue
-					if (compareSemver({ a: entry.currentVersion, b: v }) >= 0) continue
-					if (!best || compareSemver({ a: best, b: v }) < 0) best = v
+				const parsed = npmRegistryResponseSchema.safeParse(
+					await response.json()
+				)
+				if (!parsed.success) return
+				const data = parsed.data
+
+				if (parseSemver({ version: entry.currentVersion })?.prerelease) {
+					// Prerelease entry: find highest version from all published versions
+					const allVersions = data.versions ? Object.keys(data.versions) : []
+					let best: string | null = null
+					for (const v of allVersions) {
+						if (!parseSemver({ version: v })) continue
+						if (compareSemver({ a: entry.currentVersion, b: v }) >= 0) {
+							continue
+						}
+						if (!best || compareSemver({ a: best, b: v }) < 0) best = v
+					}
+					if (best) results.set(entry.name, best)
+				} else {
+					// Stable entry: use dist-tags.latest, reject prereleases
+					const latest = data['dist-tags']?.latest
+					if (latest && !latest.includes('-')) {
+						results.set(entry.name, latest)
+					}
 				}
-				if (best) results.set(entry.name, best)
-			} else {
-				// Stable entry: use dist-tags.latest, reject prereleases
-				const latest = data['dist-tags']?.latest
-				if (latest && !latest.includes('-')) {
-					results.set(entry.name, latest)
-				}
-			}
+			})
 		} catch (error: unknown) {
 			const message =
 				error instanceof Error ? (error.stack ?? error.message) : String(error)
 			console.warn(`  Warning: Error fetching ${entry.npmName}: ${message}`)
-		} finally {
-			semaphore.release()
 		}
 	})
 
@@ -297,41 +316,44 @@ export async function queryPackageMetadata({
 			return
 		}
 
-		await semaphore.acquire()
 		try {
-			const encodedName = candidate.npmName.replace('/', '%2f')
-			const response = await fetchWithRetry(
-				`https://registry.npmjs.org/${encodedName}`,
-				{
-					headers: { Accept: 'application/json' },
-					signal: AbortSignal.timeout(15_000)
+			await withSemaphore(semaphore, async () => {
+				const encodedName = candidate.npmName.replace('/', '%2f')
+				const response = await fetchWithRetry(
+					`https://registry.npmjs.org/${encodedName}`,
+					{
+						headers: { Accept: 'application/json' },
+						signal: AbortSignal.timeout(15_000)
+					}
+				)
+
+				if (!response.ok) return
+
+				const parsed = npmMetadataResponseSchema.safeParse(
+					await response.json()
+				)
+				if (!parsed.success) return
+				const data = parsed.data
+
+				const repoUrl = data.repository?.url
+				const repo = repoUrl ? parseGitHubRepo({ url: repoUrl }) : null
+
+				const publishedVersions = data.versions
+					? Object.keys(data.versions)
+					: []
+				const publishTimes = data.time ?? {}
+
+				const metadata: PackageMetadata = {
+					repo,
+					publishedVersions,
+					publishTimes
 				}
-			)
 
-			if (!response.ok) return
-
-			const parsed = npmMetadataResponseSchema.safeParse(await response.json())
-			if (!parsed.success) return
-			const data = parsed.data
-
-			const repoUrl = data.repository?.url
-			const repo = repoUrl ? parseGitHubRepo({ url: repoUrl }) : null
-
-			const publishedVersions = data.versions ? Object.keys(data.versions) : []
-			const publishTimes = data.time ?? {}
-
-			const metadata: PackageMetadata = {
-				repo,
-				publishedVersions,
-				publishTimes
-			}
-
-			seen.set(candidate.npmName, metadata)
-			results.set(candidate.name, metadata)
+				seen.set(candidate.npmName, metadata)
+				results.set(candidate.name, metadata)
+			})
 		} catch {
 			// Non-critical — skip silently
-		} finally {
-			semaphore.release()
 		}
 	})
 
@@ -384,80 +406,79 @@ export async function queryReleaseNotes({
 
 	const tasks = [...repoToCandidates.values()].map(
 		async ({ repo, candidates: repoCandidates }) => {
-			await semaphore.acquire()
 			try {
-				const response = await fetchWithRetry(
-					`https://api.github.com/repos/${repo.owner}/${repo.repo}/releases?per_page=100`,
-					{ headers, signal: AbortSignal.timeout(15_000) }
-				)
-				if (!response.ok) return
+				await withSemaphore(semaphore, async () => {
+					const response = await fetchWithRetry(
+						`https://api.github.com/repos/${repo.owner}/${repo.repo}/releases?per_page=100`,
+						{ headers, signal: AbortSignal.timeout(15_000) }
+					)
+					if (!response.ok) return
 
-				const parsed = githubReleasesSchema.safeParse(await response.json())
-				if (!parsed.success) return
-				const releases = parsed.data
+					const parsed = githubReleasesSchema.safeParse(await response.json())
+					if (!parsed.success) return
+					const releases = parsed.data
 
-				const genericReleases = new Map<
-					string,
-					{ body: string; htmlUrl: string }
-				>()
-				const packageReleases = new Map<
-					string,
-					{ body: string; htmlUrl: string }
-				>()
+					const genericReleases = new Map<
+						string,
+						{ body: string; htmlUrl: string }
+					>()
+					const packageReleases = new Map<
+						string,
+						{ body: string; htmlUrl: string }
+					>()
 
-				for (const release of releases) {
-					const body = release.body?.trim()
-					if (!body) continue
-					const version = extractVersionFromTag({ tag: release.tag_name })
-					if (!version) continue
+					for (const release of releases) {
+						const body = release.body?.trim()
+						if (!body) continue
+						const version = extractVersionFromTag({ tag: release.tag_name })
+						if (!version) continue
 
-					const releaseData = { body, htmlUrl: release.html_url ?? '' }
-					const packageMatch = release.tag_name.match(/^(.+)@\d+\.\d+\.\d+/)
+						const releaseData = { body, htmlUrl: release.html_url ?? '' }
+						const packageMatch = release.tag_name.match(/^(.+)@\d+\.\d+\.\d+/)
 
-					if (packageMatch?.[1]) {
-						packageReleases.set(`${packageMatch[1]}:${version}`, releaseData)
-					} else {
-						genericReleases.set(version, releaseData)
+						if (packageMatch?.[1]) {
+							packageReleases.set(`${packageMatch[1]}:${version}`, releaseData)
+						} else {
+							genericReleases.set(version, releaseData)
+						}
 					}
-				}
 
-				for (const candidate of repoCandidates) {
-					const metadata = packageMetadata.get(candidate.name)
-					if (!metadata) continue
+					for (const candidate of repoCandidates) {
+						const metadata = packageMetadata.get(candidate.name)
+						if (!metadata) continue
 
-					const intermediateVersions = getIntermediateVersions({
-						publishedVersions: metadata.publishedVersions,
-						currentVersion: candidate.currentVersion,
-						latestVersion: candidate.latestVersion,
-						includePrerelease: candidate.currentVersion.includes('-')
-					})
+						const intermediateVersions = getIntermediateVersions({
+							publishedVersions: metadata.publishedVersions,
+							currentVersion: candidate.currentVersion,
+							latestVersion: candidate.latestVersion,
+							includePrerelease: candidate.currentVersion.includes('-')
+						})
 
-					const notes: VersionReleaseNote[] = []
-					for (const version of intermediateVersions) {
-						const release =
-							packageReleases.get(`${candidate.npmName}:${version}`) ??
-							genericReleases.get(version)
-						if (!release) continue
+						const notes: VersionReleaseNote[] = []
+						for (const version of intermediateVersions) {
+							const release =
+								packageReleases.get(`${candidate.npmName}:${version}`) ??
+								genericReleases.get(version)
+							if (!release) continue
 
-						let body = release.body
-						if (body.length > RELEASE_NOTES_MAX_LENGTH) {
-							const releaseUrl =
-								release.htmlUrl ||
-								`https://github.com/${repo.owner}/${repo.repo}/releases`
-							body = `${body.slice(0, RELEASE_NOTES_MAX_LENGTH)}\n\n…[full notes](${releaseUrl})`
+							let body = release.body
+							if (body.length > RELEASE_NOTES_MAX_LENGTH) {
+								const releaseUrl =
+									release.htmlUrl ||
+									`https://github.com/${repo.owner}/${repo.repo}/releases`
+								body = `${body.slice(0, RELEASE_NOTES_MAX_LENGTH)}\n\n…[full notes](${releaseUrl})`
+							}
+
+							notes.push({ version, body })
 						}
 
-						notes.push({ version, body })
+						if (notes.length > 0) {
+							results.set(candidate.name, notes)
+						}
 					}
-
-					if (notes.length > 0) {
-						results.set(candidate.name, notes)
-					}
-				}
+				})
 			} catch {
 				// Non-critical — skip silently
-			} finally {
-				semaphore.release()
 			}
 		}
 	)

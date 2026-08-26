@@ -1,5 +1,5 @@
 import { matchesAnyPattern } from './utils'
-import { packageJsonSchema } from './schemas'
+import { readStringRecord } from './schemas'
 
 /**
  * Discovers all directories containing a package.json with a `catalog` field.
@@ -33,7 +33,7 @@ export async function discoverCatalogDirectories({
 
 		try {
 			const packageJson = await Bun.file(`${cwd}/${path}`).json()
-			if (packageJsonSchema.safeParse(packageJson?.catalog).success) {
+			if (readStringRecord(packageJson?.catalog) !== undefined) {
 				directories.push(dir)
 			}
 		} catch (error: unknown) {

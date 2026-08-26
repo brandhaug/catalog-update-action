@@ -57,6 +57,16 @@ export function parseSemver({ version }: { version: string }): {
 	}
 }
 
+/** Compare one prerelease identifier pair: numeric < string, then lexicographic. */
+function comparePrereleaseIdentifier(a: string, b: string): number {
+	const numA = /^\d+$/.test(a) ? Number(a) : null
+	const numB = /^\d+$/.test(b) ? Number(b) : null
+	if (numA !== null && numB !== null) return numA - numB
+	if (numA !== null) return -1 // numeric < string
+	if (numB !== null) return 1 // string > numeric
+	return a.localeCompare(b)
+}
+
 /** Compare prerelease identifiers per semver 2.0.0 spec: release > prerelease, numeric < string, left-to-right. */
 function comparePrerelease(a?: string, b?: string): number {
 	if (a === b) return 0
@@ -75,19 +85,7 @@ function comparePrerelease(a?: string, b?: string): number {
 		if (pa === undefined) return -1
 		if (pb === undefined) return 1
 
-		const numA = /^\d+$/.test(pa) ? Number(pa) : null
-		const numB = /^\d+$/.test(pb) ? Number(pb) : null
-
-		if (numA !== null && numB !== null) {
-			if (numA !== numB) return numA - numB
-		}
-		if (numA !== null && numB === null) {
-			return -1 // numeric < string
-		}
-		if (numA === null && numB !== null) {
-			return 1 // string > numeric
-		}
-		const cmp = pa.localeCompare(pb)
+		const cmp = comparePrereleaseIdentifier(pa, pb)
 		if (cmp !== 0) return cmp
 	}
 

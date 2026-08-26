@@ -6,7 +6,7 @@ import {
 	type Severity
 } from './types'
 import { compareSemver, getOverrideBranchPrefix, PR_FOOTER } from './utils'
-import { type PackageJson, stringRecordSchema } from './schemas'
+import { readStringRecord, severitySchema, type PackageJson } from './schemas'
 
 // ---------------------------------------------------------------------------
 // Severity ordering
@@ -25,7 +25,7 @@ const auditAdvisorySchema = z.object({
 	id: z.number(),
 	url: z.string(),
 	title: z.string(),
-	severity: z.enum(['info', 'low', 'moderate', 'high', 'critical']),
+	severity: severitySchema,
 	vulnerable_versions: z.string(),
 	cwe: z.array(z.string()),
 	cvss: z.object({ score: z.number(), vectorString: z.string() })
@@ -306,8 +306,7 @@ export function buildOverrideBranchUpdate({
 		body,
 		deleteLockfile: true,
 		applyChanges: (packageJson) => {
-			const parsed = stringRecordSchema.safeParse(packageJson.overrides)
-			const current = parsed.success ? parsed.data : {}
+			const current = readStringRecord(packageJson.overrides) ?? {}
 			const result: Record<string, string> = {}
 
 			// Preserve user-added overrides (non-tool keys)
@@ -342,8 +341,7 @@ export function isOverrideBranchOutdated({
 	branchPackageJson: PackageJson
 	expectedOverrides: OverrideEntry[]
 }): boolean {
-	const parsed = stringRecordSchema.safeParse(branchPackageJson.overrides)
-	const overrides = parsed.success ? parsed.data : undefined
+	const overrides = readStringRecord(branchPackageJson.overrides)
 	if (!overrides) return expectedOverrides.length > 0
 
 	// Check all expected overrides are present with correct versions

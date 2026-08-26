@@ -1,4 +1,5 @@
-import { type PackageJson } from './schemas'
+import { type PackageJson, type Severity } from './schemas'
+export type { Severity } from './schemas'
 
 export type SemverChange =
 	| 'major'
@@ -10,8 +11,6 @@ export type SemverChange =
 // ---------------------------------------------------------------------------
 // Audit types
 // ---------------------------------------------------------------------------
-
-export type Severity = 'info' | 'low' | 'moderate' | 'high' | 'critical'
 
 export type AuditAdvisory = {
 	id: number

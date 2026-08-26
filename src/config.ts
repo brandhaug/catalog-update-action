@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { severitySchema } from './schemas'
 import {
 	type AutoMergeConfig,
 	type AuditConfig,
@@ -40,7 +41,6 @@ const semverChangeSchema = z.enum([
 ])
 const packageManagerSchema = z.enum(['bun', 'npm', 'pnpm', 'yarn'])
 const mergeMethodSchema = z.enum(['squash', 'merge', 'rebase'])
-const severitySchema = z.enum(['info', 'low', 'moderate', 'high', 'critical'])
 
 /**
  * Parse an `updateTypes` value: null/undefined/non-array become null; an array
@@ -57,6 +57,12 @@ function parseUpdateTypes({ raw }: { raw: unknown }): SemverChange[] | null {
 	return valid.length > 0 ? valid : null
 }
 
+/** Shared `updateTypes` field for group and ignore-rule schemas. */
+const updateTypesField = z
+	.unknown()
+	.optional()
+	.transform((raw) => parseUpdateTypes({ raw }))
+
 const groupDefinitionSchema = z.object({
 	name: z.string(),
 	patterns: z
@@ -64,10 +70,7 @@ const groupDefinitionSchema = z.object({
 		.transform((items) =>
 			items.filter((item): item is string => z.string().safeParse(item).success)
 		),
-	updateTypes: z
-		.unknown()
-		.optional()
-		.transform((raw) => parseUpdateTypes({ raw }))
+	updateTypes: updateTypesField
 })
 
 function parseGroups({ raw }: { raw: unknown }): GroupDefinition[] {
@@ -105,10 +108,7 @@ export function parseAutoMergeConfig({
 
 const ignoreRuleSchema = z.object({
 	pattern: z.string(),
-	updateTypes: z
-		.unknown()
-		.optional()
-		.transform((raw) => parseUpdateTypes({ raw }))
+	updateTypes: updateTypesField
 })
 
 function parseIgnoreRules({ raw }: { raw: unknown }): IgnoreRule[] {
