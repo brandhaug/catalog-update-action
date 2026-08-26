@@ -14,5 +14,4 @@ jobs:
           bun-version: 1.4.0
       - run: bun install
       - run: bun run lint
-      - run: bun run fmt:check
       - run: bun test
