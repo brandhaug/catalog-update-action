@@ -1,9 +1,10 @@
-import type {
-	CatalogEntry,
-	GitHubRepo,
-	PackageMetadata,
-	UpdateCandidate,
-	VersionReleaseNote
+import { z } from 'zod'
+import {
+	type CatalogEntry,
+	type GitHubRepo,
+	type PackageMetadata,
+	type UpdateCandidate,
+	type VersionReleaseNote
 } from './types'
 import {
 	classifySemverChange,
@@ -11,11 +12,33 @@ import {
 	extractVersionFromTag,
 	getIntermediateVersions,
 	parseSemver,
-	Semaphore
+	type Semaphore
 } from './utils'
 
 const RELEASE_NOTES_MAX_LENGTH = 2000
 const COMBINED_RELEASE_NOTES_MAX_LENGTH = 5000
+
+/** Shape of the npm registry `install-v1` response for a package. */
+const npmRegistryResponseSchema = z.object({
+	'dist-tags': z.object({ latest: z.string() }).optional(),
+	versions: z.record(z.string(), z.unknown()).optional()
+})
+
+/** Shape of the npm registry full-metadata response for a package. */
+const npmMetadataResponseSchema = z.object({
+	repository: z.object({ url: z.string() }).optional(),
+	versions: z.record(z.string(), z.unknown()).optional(),
+	time: z.record(z.string(), z.string()).optional()
+})
+
+/** Shape of the GitHub releases list response. */
+const githubReleasesSchema = z.array(
+	z.object({
+		tag_name: z.string(),
+		body: z.string().optional(),
+		html_url: z.string().optional()
+	})
+)
 
 /** Retries fetch on transient failures (429, 5xx) or network errors. */
 async function fetchWithRetry(
@@ -24,6 +47,9 @@ async function fetchWithRetry(
 	retries = 1
 ): Promise<Response> {
 	let lastError: unknown
+	// Retries are inherently sequential: each attempt must settle before the
+	// next backoff runs, so the awaits in this loop are intentional.
+	/* oxlint-disable no-await-in-loop */
 	for (let attempt = 0; attempt <= retries; attempt++) {
 		try {
 			const response = await fetch(url, init)
@@ -40,6 +66,7 @@ async function fetchWithRetry(
 			}
 		}
 	}
+	/* oxlint-enable no-await-in-loop */
 	throw lastError
 }
 
@@ -76,10 +103,9 @@ export async function queryNpmRegistry({
 				return
 			}
 
-			const data = (await response.json()) as {
-				'dist-tags'?: { latest?: string }
-				versions?: Record<string, unknown>
-			}
+			const parsed = npmRegistryResponseSchema.safeParse(await response.json())
+			if (!parsed.success) return
+			const data = parsed.data
 
 			if (parseSemver({ version: entry.currentVersion })?.prerelease) {
 				// Prerelease entry: find highest version from all published versions
@@ -284,17 +310,16 @@ export async function queryPackageMetadata({
 
 			if (!response.ok) return
 
-			const data = (await response.json()) as {
-				repository?: { url?: string }
-				versions?: Record<string, unknown>
-				time?: Record<string, string>
-			}
+			const parsed = npmMetadataResponseSchema.safeParse(await response.json())
+			if (!parsed.success) return
+			const data = parsed.data
 
 			const repoUrl = data.repository?.url
 			const repo = repoUrl ? parseGitHubRepo({ url: repoUrl }) : null
 
 			const publishedVersions = data.versions ? Object.keys(data.versions) : []
 			const publishTimes = data.time ?? {}
+
 			const metadata: PackageMetadata = {
 				repo,
 				publishedVersions,
@@ -318,6 +343,8 @@ export async function queryPackageMetadata({
 // GitHub release notes
 // ---------------------------------------------------------------------------
 
+const repoKey = (repo: GitHubRepo): string => `${repo.owner}/${repo.repo}`
+
 export async function queryReleaseNotes({
 	candidates,
 	packageMetadata,
@@ -329,14 +356,12 @@ export async function queryReleaseNotes({
 }): Promise<Map<string, VersionReleaseNote[]>> {
 	const results = new Map<string, VersionReleaseNote[]>()
 	const githubToken = process.env.GITHUB_TOKEN
-	const headers: Record<string, string> = {
-		Accept: 'application/vnd.github+json'
-	}
+	const headers: Record<string, string> = {}
+	headers.Accept = 'application/vnd.github+json'
 	if (githubToken) {
 		headers.Authorization = `Bearer ${githubToken}`
 	}
 
-	const repoKey = (repo: GitHubRepo): string => `${repo.owner}/${repo.repo}`
 	const repoToCandidates = new Map<
 		string,
 		{ repo: GitHubRepo; candidates: UpdateCandidate[] }
@@ -367,11 +392,9 @@ export async function queryReleaseNotes({
 				)
 				if (!response.ok) return
 
-				const releases = (await response.json()) as Array<{
-					tag_name: string
-					body?: string
-					html_url?: string
-				}>
+				const parsed = githubReleasesSchema.safeParse(await response.json())
+				if (!parsed.success) return
+				const releases = parsed.data
 
 				const genericReleases = new Map<
 					string,

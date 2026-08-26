@@ -1,4 +1,4 @@
-import type { Config, SemverChange, UpdateCandidate } from './types'
+import { type Config, type SemverChange, type UpdateCandidate } from './types'
 import { matchesAnyPattern, matchesGlob } from './utils'
 
 export function shouldIgnore({
@@ -34,13 +34,15 @@ export function assignToGroups({
 			if (assigned.has(candidate.name)) continue
 			if (
 				!matchesAnyPattern({ name: candidate.name, patterns: group.patterns })
-			)
+			) {
 				continue
+			}
 			if (
 				group.updateTypes !== null &&
 				!group.updateTypes.includes(candidate.changeType)
-			)
+			) {
 				continue
+			}
 
 			members.push(candidate)
 			assigned.add(candidate.name)

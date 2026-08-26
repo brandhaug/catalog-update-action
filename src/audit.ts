@@ -1,22 +1,37 @@
-import type {
-	AuditResult,
-	BranchUpdate,
-	OverrideEntry,
-	Severity
+import { z } from 'zod'
+import {
+	type AuditResult,
+	type BranchUpdate,
+	type OverrideEntry,
+	type Severity
 } from './types'
 import { compareSemver, getOverrideBranchPrefix, PR_FOOTER } from './utils'
+import { type PackageJson, stringRecordSchema } from './schemas'
 
 // ---------------------------------------------------------------------------
 // Severity ordering
 // ---------------------------------------------------------------------------
 
-const SEVERITY_ORDER: Record<Severity, number> = {
+const SEVERITY_ORDER = {
 	info: 0,
 	low: 1,
 	moderate: 2,
 	high: 3,
 	critical: 4
-}
+} satisfies Record<Severity, number>
+
+/** Validate a `bun audit --json` advisory entry before trusting its fields. */
+const auditAdvisorySchema = z.object({
+	id: z.number(),
+	url: z.string(),
+	title: z.string(),
+	severity: z.enum(['info', 'low', 'moderate', 'high', 'critical']),
+	vulnerable_versions: z.string(),
+	cwe: z.array(z.string()),
+	cvss: z.object({ score: z.number(), vectorString: z.string() })
+})
+
+const auditResultSchema = z.record(z.string(), z.array(auditAdvisorySchema))
 
 // ---------------------------------------------------------------------------
 // Run bun audit
@@ -53,14 +68,12 @@ export async function runAudit({
 	}
 
 	try {
-		const parsed: unknown = JSON.parse(output)
-
-		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		const parsed = auditResultSchema.safeParse(JSON.parse(output))
+		if (!parsed.success) {
 			console.warn('  bun audit returned unexpected JSON format')
 			return null
 		}
-
-		return parsed as AuditResult
+		return parsed.data
 	} catch {
 		console.warn('  Failed to parse bun audit output')
 		return null
@@ -94,11 +107,12 @@ export function parseFixedVersion({
 	let m: RegExpExecArray | null
 
 	while ((m = regex.exec(vulnerableVersions)) !== null) {
-		strictBounds.push(m[1]!)
+		const bound = m[1]
+		if (bound !== undefined) strictBounds.push(bound)
 	}
 
 	if (strictBounds.length === 0) return null
-	if (strictBounds.length === 1) return strictBounds[0]!
+	if (strictBounds.length === 1) return strictBounds[0] ?? null
 
 	return strictBounds.reduce((highest, v) =>
 		compareSemver({ a: v, b: highest }) > 0 ? v : highest
@@ -291,9 +305,9 @@ export function buildOverrideBranchUpdate({
 		title,
 		body,
 		deleteLockfile: true,
-		applyChanges: (packageJson: Record<string, unknown>) => {
-			const current =
-				(packageJson.overrides as Record<string, string> | undefined) ?? {}
+		applyChanges: (packageJson) => {
+			const parsed = stringRecordSchema.safeParse(packageJson.overrides)
+			const current = parsed.success ? parsed.data : {}
 			const result: Record<string, string> = {}
 
 			// Preserve user-added overrides (non-tool keys)
@@ -325,12 +339,11 @@ export function isOverrideBranchOutdated({
 	branchPackageJson,
 	expectedOverrides
 }: {
-	branchPackageJson: Record<string, unknown>
+	branchPackageJson: PackageJson
 	expectedOverrides: OverrideEntry[]
 }): boolean {
-	const overrides = branchPackageJson.overrides as
-		| Record<string, string>
-		| undefined
+	const parsed = stringRecordSchema.safeParse(branchPackageJson.overrides)
+	const overrides = parsed.success ? parsed.data : undefined
 	if (!overrides) return expectedOverrides.length > 0
 
 	// Check all expected overrides are present with correct versions

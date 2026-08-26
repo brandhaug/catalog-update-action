@@ -1,11 +1,12 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { discoverCatalogDirectories } from '../src/discover'
-import { mkdirSync, rmSync } from 'fs'
-import { join } from 'path'
+import { mkdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { type PackageJson } from '../src/schemas'
 
 const FIXTURE_DIR = join(import.meta.dir, '.fixtures-discover')
 
-async function writePackageJson(dir: string, content: Record<string, unknown>): Promise<void> {
+async function writePackageJson(dir: string, content: PackageJson): Promise<void> {
   mkdirSync(dir, { recursive: true })
   await Bun.write(join(dir, 'package.json'), JSON.stringify(content, null, 2))
 }

@@ -3,6 +3,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
@@ -11,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["bun"]
   },
-  "include": ["src"]
+  "include": ["src", "test"]
 }

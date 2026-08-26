@@ -1,5 +1,4 @@
-import type { SemverChange } from './types'
-export type { SemverChange } from './types'
+import { type SemverChange } from './types'
 
 // ---------------------------------------------------------------------------
 // Glob matching
@@ -50,18 +49,12 @@ export function parseSemver({ version }: { version: string }): {
 		/^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?(?:\+[\w.]+)?$/
 	)
 	if (!match) return null
-	const result: {
-		major: number
-		minor: number
-		patch: number
-		prerelease?: string
-	} = {
+	return {
 		major: Number(match[1]),
 		minor: Number(match[2]),
-		patch: Number(match[3])
+		patch: Number(match[3]),
+		prerelease: match[4]
 	}
-	if (match[4]) result.prerelease = match[4]
-	return result
 }
 
 /** Compare prerelease identifiers per semver 2.0.0 spec: release > prerelease, numeric < string, left-to-right. */
@@ -87,14 +80,15 @@ function comparePrerelease(a?: string, b?: string): number {
 
 		if (numA !== null && numB !== null) {
 			if (numA !== numB) return numA - numB
-		} else if (numA !== null) {
-			return -1 // numeric < string
-		} else if (numB !== null) {
-			return 1 // string > numeric
-		} else {
-			const cmp = pa.localeCompare(pb)
-			if (cmp !== 0) return cmp
 		}
+		if (numA !== null && numB === null) {
+			return -1 // numeric < string
+		}
+		if (numA === null && numB !== null) {
+			return 1 // string > numeric
+		}
+		const cmp = pa.localeCompare(pb)
+		if (cmp !== 0) return cmp
 	}
 
 	return 0
@@ -114,8 +108,12 @@ export function classifySemverChange({
 	if (b.major < a.major) return null
 	if (b.minor > a.minor) return 'minor'
 	if (b.minor < a.minor) return null
-	if (b.patch > a.patch)
-		return a.prerelease ? (b.prerelease ? 'prerelease' : 'release') : 'patch'
+	if (b.patch > a.patch) {
+		if (a.prerelease) {
+			return b.prerelease ? 'prerelease' : 'release'
+		}
+		return 'patch'
+	}
 	if (b.patch < a.patch) return null
 	// Same major.minor.patch — compare prerelease
 	const cmp = comparePrerelease(a.prerelease, b.prerelease)

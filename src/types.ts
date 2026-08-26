@@ -1,3 +1,5 @@
+import { type PackageJson } from './schemas'
+
 export type SemverChange =
 	| 'major'
 	| 'minor'
@@ -11,7 +13,7 @@ export type SemverChange =
 
 export type Severity = 'info' | 'low' | 'moderate' | 'high' | 'critical'
 
-export interface AuditAdvisory {
+export type AuditAdvisory = {
 	id: number
 	url: string
 	title: string
@@ -23,7 +25,7 @@ export interface AuditAdvisory {
 
 export type AuditResult = Record<string, AuditAdvisory[]>
 
-export interface OverrideEntry {
+export type OverrideEntry = {
 	packageName: string
 	vulnerableRange: string
 	fixedVersion: string
@@ -36,7 +38,7 @@ export interface OverrideEntry {
 // Directory context (for multi-directory / monorepo support)
 // ---------------------------------------------------------------------------
 
-export interface DirectoryContext {
+export type DirectoryContext = {
 	/** Repo root (absolute path, used for git operations) */
 	cwd: string
 	/** Project directory (absolute path, used for install/audit) */
@@ -51,12 +53,12 @@ export interface DirectoryContext {
 // Generic PR abstraction
 // ---------------------------------------------------------------------------
 
-export interface BranchUpdate {
+export type BranchUpdate = {
 	branch: string
 	title: string
 	body: string
 	/** Mutates the given packageJson object in place to apply this update's changes. */
-	applyChanges: (packageJson: Record<string, unknown>) => void
+	applyChanges: (packageJson: PackageJson) => void
 	/**
 	 * When true, delete the lockfile before running install to force full
 	 * re-resolution.  Needed for override branches because bun's `@range`
@@ -69,12 +71,12 @@ export interface BranchUpdate {
 // Audit config
 // ---------------------------------------------------------------------------
 
-export interface AuditConfig {
+export type AuditConfig = {
 	enabled: boolean
 	minimumSeverity: Severity
 }
 
-export interface CatalogEntry {
+export type CatalogEntry = {
 	name: string
 	/** The raw value from catalog (may include `npm:` alias or `^` prefix) */
 	raw: string
@@ -95,44 +97,44 @@ export type UpdateCandidate = CatalogEntry & {
 	changeType: SemverChange
 }
 
-export interface GroupDefinition {
+export type GroupDefinition = {
 	name: string
 	patterns: string[]
 	updateTypes: SemverChange[] | null
 }
 
-export interface IgnoreRule {
+export type IgnoreRule = {
 	pattern: string
 	updateTypes: SemverChange[] | null
 }
 
-export interface ExistingPr {
+export type ExistingPr = {
 	headRefName: string
 	number: number
 	mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
 	title: string
 }
 
-export interface GitHubRepo {
+export type GitHubRepo = {
 	owner: string
 	repo: string
 }
 
-export interface PackageMetadata {
+export type PackageMetadata = {
 	repo: GitHubRepo | null
 	publishedVersions: string[]
 	/** Mapping of version → ISO 8601 publish timestamp from npm registry */
 	publishTimes: Record<string, string>
 }
 
-export interface VersionReleaseNote {
+export type VersionReleaseNote = {
 	version: string
 	body: string
 }
 
 export type MergeMethod = 'squash' | 'merge' | 'rebase'
 
-export interface AutoMergeConfig {
+export type AutoMergeConfig = {
 	enabled: boolean
 	mergeMethod: MergeMethod
 }
@@ -141,7 +143,7 @@ export interface AutoMergeConfig {
 // Config
 // ---------------------------------------------------------------------------
 
-export interface Config {
+export type Config = {
 	branchPrefix: string
 	defaultBranch: string
 	maxOpenPrs: number

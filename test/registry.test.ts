@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { filterByReleaseAge, getVersionAgeDays } from '../src/registry'
-import type { PackageMetadata, UpdateCandidate } from '../src/types'
+import { type PackageMetadata, type UpdateCandidate } from '../src/types'
 
 const NOW = new Date('2026-03-31T12:00:00.000Z')
 

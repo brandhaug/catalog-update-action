@@ -33,16 +33,17 @@
     "start": "bun src/main.ts",
     "dry-run": "bun src/main.ts --dry-run",
     "test": "bun test",
-    "lint": "bunx oxlint --type-aware src/",
+    "lint": "bunx oxlint --type-aware src/ test/",
     "fmt": "bunx oxfmt src/",
     "fmt:check": "bunx oxfmt --check src/",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
+    "@types/bun": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "@types/bun": "catalog:"
+    "ultracite": "7.10.6"
   },
   "catalog": {
     "oxfmt": "0.64.0",
@@ -54,5 +55,8 @@
     "bun": ">=1.4.0"
   },
   "packageManager": "bun@1.4.0",
-  "workspaces": []
+  "workspaces": [],
+  "dependencies": {
+    "zod": "4.4.3"
+  }
 }

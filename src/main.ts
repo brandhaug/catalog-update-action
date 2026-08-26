@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { version as packageVersion } from '../package.json'
 import { loadConfig } from './config'
 import { parseCatalog } from './catalog'
 import { discoverCatalogDirectories } from './discover'
@@ -28,12 +29,13 @@ import {
 	Semaphore,
 	getOverrideBranchPrefix
 } from './utils'
-import type {
-	BranchUpdate,
-	DirectoryContext,
-	OverrideEntry,
-	UpdateCandidate,
-	VersionReleaseNote
+import { stringRecordSchema, type PackageJson } from './schemas'
+import {
+	type BranchUpdate,
+	type DirectoryContext,
+	type OverrideEntry,
+	type UpdateCandidate,
+	type VersionReleaseNote
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -68,43 +70,64 @@ Examples:
   - uses: brandhaug/catalog-update-action@v1
 `.trim()
 
-function parseArgs(): {
-	dryRun: boolean
-	configPath: string
-	excludeDirectories: string[]
-} {
+function parseArgs() {
 	const args = process.argv.slice(2)
 	let configPath = '.catalog-updaterc.json'
 	let dryRun = false
 	let excludeRaw = ''
 
 	for (let i = 0; i < args.length; i++) {
-		const arg = args[i]!
-		if (arg === '--help' || arg === '-h') {
-			console.log(HELP_TEXT)
-			process.exit(0)
-		} else if (arg === '--version' || arg === '-v') {
-			const pkg = require('../package.json')
-			console.log(pkg.version)
-			process.exit(0)
-		} else if (arg === '--dry-run' || arg === '-d') {
-			dryRun = true
-		} else if (
-			(arg === '--config' || arg === '-c') &&
-			args[i + 1] !== undefined
-		) {
-			configPath = args[i + 1] as string
-			i++
-		} else if (
-			(arg === '--exclude' || arg === '-e') &&
-			args[i + 1] !== undefined
-		) {
-			excludeRaw = args[i + 1] as string
-			i++
-		} else if (arg.startsWith('-')) {
-			console.error(`Unknown option: ${arg}`)
-			console.error('Run with --help for usage information.')
-			process.exit(1)
+		const arg = args[i]
+		if (arg === undefined) break
+
+		switch (arg) {
+			case '--help':
+			case '-h': {
+				console.log(HELP_TEXT)
+				process.exit(0)
+				break
+			}
+			case '--version':
+			case '-v': {
+				console.log(packageVersion)
+				process.exit(0)
+				break
+			}
+			case '--dry-run':
+			case '-d': {
+				dryRun = true
+				break
+			}
+			case '--config':
+			case '-c': {
+				const next = args[i + 1]
+				if (next === undefined) {
+					console.error(`Missing value for ${arg}`)
+					process.exit(1)
+				}
+				configPath = next
+				i++
+				break
+			}
+			case '--exclude':
+			case '-e': {
+				const next = args[i + 1]
+				if (next === undefined) {
+					console.error(`Missing value for ${arg}`)
+					process.exit(1)
+				}
+				excludeRaw = next
+				i++
+				break
+			}
+			default: {
+				if (arg.startsWith('-')) {
+					console.error(`Unknown option: ${arg}`)
+					console.error('Run with --help for usage information.')
+					process.exit(1)
+				}
+				break
+			}
 		}
 	}
 
@@ -178,7 +201,8 @@ async function processDirectory({
 	// 2. Parse catalog
 	console.log('  Parsing catalog...')
 	const packageJson = await Bun.file(dir.packageJsonPath).json()
-	const catalog = packageJson.catalog as Record<string, string> | undefined
+	const catalogResult = stringRecordSchema.safeParse(packageJson?.catalog)
+	const catalog = catalogResult.success ? catalogResult.data : undefined
 
 	if (!catalog) {
 		console.error('  No catalog found in package.json')
@@ -297,8 +321,12 @@ async function processDirectory({
 
 		if (auditResult) {
 			const catalogNames = new Set(entries.map((e) => e.name))
-			const existingOverrides =
-				(packageJson.overrides as Record<string, string> | undefined) ?? {}
+			const overridesResult = stringRecordSchema.safeParse(
+				packageJson?.overrides
+			)
+			const existingOverrides = overridesResult.success
+				? overridesResult.data
+				: {}
 
 			overrideEntries = computeOverrides({
 				auditResult,
@@ -314,8 +342,9 @@ async function processDirectory({
 				const newCount = overrideEntries.length - staleCount
 				const parts: string[] = []
 				if (newCount > 0) parts.push(`${newCount} new`)
-				if (staleCount > 0)
+				if (staleCount > 0) {
 					parts.push(`${staleCount} stale (lockfile not re-resolved)`)
+				}
 				console.log(
 					`    Found ${overrideEntries.length} transitive vulnerability override(s): ${parts.join(', ')}`
 				)
@@ -377,16 +406,16 @@ async function processDirectory({
 				releaseNotes
 			})
 		},
-		isBranchContentOutdated: (
-			branchPkg: Record<string, unknown>,
-			branchName: string
-		) => {
+		isBranchContentOutdated: (branchPkg: PackageJson, branchName: string) => {
 			const groupName = branchName.slice(`${effectiveBranchPrefix}/`.length)
 			const updates = groups.get(groupName)
 			if (!updates) return true
-			const branchCatalog = branchPkg.catalog as
-				| Record<string, string>
-				| undefined
+			const branchCatalogResult = stringRecordSchema.safeParse(
+				branchPkg.catalog
+			)
+			const branchCatalog = branchCatalogResult.success
+				? branchCatalogResult.data
+				: undefined
 			if (!branchCatalog) return true
 			for (const update of updates) {
 				const expected = buildCatalogValue({ update })
@@ -405,7 +434,7 @@ async function processDirectory({
 		overrideSyncResult = await syncExistingPrs({
 			existingPrs: overridePrs,
 			resolveBranchUpdate: (_branchName: string) => overrideBranchUpdate,
-			isBranchContentOutdated: (branchPkg: Record<string, unknown>) => {
+			isBranchContentOutdated: (branchPkg: PackageJson) => {
 				return isOverrideBranchOutdated({
 					branchPackageJson: branchPkg,
 					expectedOverrides: overrideEntries
@@ -475,7 +504,11 @@ async function processDirectory({
 			branchPrefix: effectiveBranchPrefix,
 			releaseNotes
 		})
+		// Each createPr checks out, installs, commits and force-pushes its own
+		// branch in the shared working tree, so PRs are created one at a time.
+		/* oxlint-disable no-await-in-loop */
 		const success = await createPr({ branchUpdate, config, dir })
+		/* oxlint-enable no-await-in-loop */
 		if (success) {
 			created++
 			openPrCount++
@@ -503,8 +536,9 @@ async function main(): Promise<void> {
 	console.log('Catalog Dependency Updater')
 	console.log(`Mode: ${dryRun ? 'DRY RUN' : 'LIVE'}`)
 	console.log(`Config: ${configPath}`)
-	if (excludeDirectories.length > 0)
+	if (excludeDirectories.length > 0) {
 		console.log(`Exclude: ${excludeDirectories.join(', ')}`)
+	}
 	console.log('')
 
 	// 0. Fetch latest remote refs and remember the starting branch for recovery
@@ -514,9 +548,11 @@ async function main(): Promise<void> {
 		console.error('Failed to fetch from origin')
 		process.exit(1)
 	}
-	const startBranch = (
-		await exec({ command: ['git', 'branch', '--show-current'], cwd })
-	).stdout.trim()
+	const startBranchResult = await exec({
+		command: ['git', 'branch', '--show-current'],
+		cwd
+	})
+	const startBranch = startBranchResult.stdout.trim()
 
 	// 1. Discover catalog directories
 	console.log('\nDiscovering catalog directories...')
@@ -539,6 +575,10 @@ async function main(): Promise<void> {
 	let totalFailed = 0
 	let totalRebuilt = 0
 
+	// Directories are processed one at a time on purpose: each one checks out
+	// branches and runs installs in the shared working tree, so running them
+	// concurrently would race the same files.
+	/* oxlint-disable no-await-in-loop */
 	for (const dir of directories) {
 		const label = dir === '.' ? '(root)' : `/${dir}`
 		console.log(`\n${'='.repeat(60)}`)
@@ -564,6 +604,7 @@ async function main(): Promise<void> {
 			await exec({ command: ['git', 'checkout', startBranch], cwd })
 		}
 	}
+	/* oxlint-enable no-await-in-loop */
 
 	// 3. Summary
 	if (!dryRun) {
@@ -580,7 +621,9 @@ async function main(): Promise<void> {
 	}
 }
 
-main().catch((error) => {
+try {
+	await main()
+} catch (error: unknown) {
 	console.error('Fatal error:', error)
 	process.exit(1)
-})
+}

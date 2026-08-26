@@ -1,14 +1,20 @@
 import { unlinkSync } from 'node:fs'
-import type {
-	BranchUpdate,
-	Config,
-	DirectoryContext,
-	ExistingPr,
-	UpdateCandidate,
-	VersionReleaseNote
+import { z } from 'zod'
+import {
+	type BranchUpdate,
+	type Config,
+	type DirectoryContext,
+	type ExistingPr,
+	type UpdateCandidate,
+	type VersionReleaseNote
 } from './types'
 import { formatReleaseNotes } from './registry'
 import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
+import {
+	packageJsonSchema,
+	type PackageJson,
+	stringRecordSchema
+} from './schemas'
 
 // ---------------------------------------------------------------------------
 // Shell execution
@@ -52,14 +58,23 @@ function getInstallCommand({
 	packageManager: Config['packageManager']
 }): string[] {
 	switch (packageManager) {
-		case 'bun':
+		case 'bun': {
 			return ['bun', 'install']
-		case 'npm':
+		}
+		case 'npm': {
 			return ['npm', 'install']
-		case 'pnpm':
+		}
+		case 'pnpm': {
 			return ['pnpm', 'install']
-		case 'yarn':
+		}
+		case 'yarn': {
 			return ['yarn', 'install']
+		}
+		default: {
+			// Unreachable while packageManager stays a closed union, but the
+			// switch must fail loudly if a new manager is ever added.
+			throw new Error('Unknown package manager')
+		}
 	}
 }
 
@@ -69,14 +84,21 @@ function getLockfileName({
 	packageManager: Config['packageManager']
 }): string {
 	switch (packageManager) {
-		case 'bun':
+		case 'bun': {
 			return 'bun.lock'
-		case 'npm':
+		}
+		case 'npm': {
 			return 'package-lock.json'
-		case 'pnpm':
+		}
+		case 'pnpm': {
 			return 'pnpm-lock.yaml'
-		case 'yarn':
+		}
+		case 'yarn': {
 			return 'yarn.lock'
+		}
+		default: {
+			throw new Error('Unknown package manager')
+		}
 	}
 }
 
@@ -153,14 +175,16 @@ export function buildCatalogBranchUpdate({
 		branch,
 		title,
 		body,
-		applyChanges: (packageJson: Record<string, unknown>) => {
-			const catalog = packageJson.catalog as Record<string, string> | undefined
-			if (!catalog || typeof catalog !== 'object') {
+		applyChanges: (packageJson) => {
+			const parsed = stringRecordSchema.safeParse(packageJson.catalog)
+			if (!parsed.success) {
 				throw new Error(`No valid catalog found in package.json`)
 			}
+			const catalog = parsed.data
 			for (const update of updates) {
 				catalog[update.name] = buildCatalogValue({ update })
 			}
+			packageJson.catalog = catalog
 		}
 	}
 }
@@ -168,6 +192,27 @@ export function buildCatalogBranchUpdate({
 // ---------------------------------------------------------------------------
 // Existing PRs
 // ---------------------------------------------------------------------------
+
+const mergeableSchema = z.enum(['MERGEABLE', 'CONFLICTING', 'UNKNOWN'])
+
+/** Validate a `gh pr list --json` item before trusting its fields. */
+const existingPrSchema = z.object({
+	headRefName: z.string(),
+	number: z.number(),
+	mergeable: mergeableSchema,
+	title: z.string()
+})
+
+/** Shape of `gh pr view --json commits` output. */
+const prCommitsSchema = z.object({
+	commits: z.array(
+		z.object({
+			authors: z.array(z.object({ login: z.string() }))
+		})
+	)
+})
+
+const mergeableStateSchema = z.object({ mergeable: mergeableSchema })
 
 export async function getExistingPrs({
 	cwd,
@@ -194,8 +239,11 @@ export async function getExistingPrs({
 	})
 
 	try {
-		const prs = JSON.parse(stdout || '[]') as ExistingPr[]
-		return prs.filter(
+		const parsed = z
+			.array(existingPrSchema)
+			.safeParse(JSON.parse(stdout || '[]'))
+		if (!parsed.success) return []
+		return parsed.data.filter(
 			(pr) =>
 				pr.headRefName.startsWith(`${branchPrefix}/`) ||
 				pr.headRefName.startsWith(
@@ -222,10 +270,11 @@ export async function hasNonBotCommits({
 	if (exitCode !== 0) return true
 
 	try {
-		const data = JSON.parse(stdout) as {
-			commits: Array<{ authors: Array<{ login: string }> }>
-		}
-		return data.commits.some((commit) =>
+		const parsed = prCommitsSchema.safeParse(JSON.parse(stdout))
+		// Any malformed shape or non-bot author means the PR may carry human
+		// work, so it is treated as "has non-bot commits" and left alone.
+		if (!parsed.success) return true
+		return parsed.data.commits.some((commit) =>
 			commit.authors.some((author) => author.login !== 'github-actions[bot]')
 		)
 	} catch {
@@ -255,8 +304,9 @@ export async function resolveMergeableState({
 	if (exitCode !== 0) return 'UNKNOWN'
 
 	try {
-		const data = JSON.parse(stdout) as { mergeable: ExistingPr['mergeable'] }
-		return data.mergeable
+		const parsed = mergeableStateSchema.safeParse(JSON.parse(stdout))
+		if (!parsed.success) return 'UNKNOWN'
+		return parsed.data.mergeable
 	} catch {
 		return 'UNKNOWN'
 	}
@@ -297,7 +347,7 @@ export async function readBranchPackageJson({
 	branch: string
 	cwd: string
 	packageJsonRelPath: string
-}): Promise<Record<string, unknown> | null> {
+}): Promise<PackageJson | null> {
 	const { stdout, exitCode } = await exec({
 		command: ['git', 'show', `origin/${branch}:${packageJsonRelPath}`],
 		cwd
@@ -306,7 +356,8 @@ export async function readBranchPackageJson({
 	if (exitCode !== 0) return null
 
 	try {
-		return JSON.parse(stdout) as Record<string, unknown>
+		const parsed = packageJsonSchema.safeParse(JSON.parse(stdout))
+		return parsed.success ? parsed.data : null
 	} catch {
 		return null
 	}
@@ -557,7 +608,7 @@ export async function createPr({
 	} else {
 		console.error(`  Failed to create PR for branch "${branchUpdate.branch}"`)
 		if (
-			prResult.stderr?.includes(
+			prResult.stderr.includes(
 				'not permitted to create or approve pull requests'
 			)
 		) {
@@ -583,7 +634,7 @@ export async function syncExistingPrs({
 	existingPrs: ExistingPr[]
 	resolveBranchUpdate: (branchName: string) => BranchUpdate | null
 	isBranchContentOutdated: (
-		branchPackageJson: Record<string, unknown>,
+		branchPackageJson: PackageJson,
 		branchName: string
 	) => boolean
 	config: Config
@@ -606,6 +657,10 @@ export async function syncExistingPrs({
 	let closedCount = 0
 	let rebuiltCount = 0
 
+	// Each iteration mutates the shared working tree (git checkout, install,
+	// commit, push) and can touch the same branches as the others, so PRs must
+	// be processed one at a time rather than in parallel.
+	/* oxlint-disable no-await-in-loop */
 	for (const pr of existingPrs) {
 		if (nonBotResults.get(pr.number)) {
 			console.log(`  Skipping PR #${pr.number} — has non-bot commits`)
@@ -713,6 +768,7 @@ export async function syncExistingPrs({
 			)
 		}
 	}
+	/* oxlint-enable no-await-in-loop */
 
 	return { closedCount, rebuiltCount }
 }

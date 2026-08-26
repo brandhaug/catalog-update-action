@@ -1,16 +1,353 @@
 {
-	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	"plugins": ["typescript", "unicorn", "oxc"],
-	"categories": {
-		"correctness": "error",
-		"suspicious": "warn"
-	},
-	"rules": {
-		"no-param-reassign": "error",
-		"default-param-last": "error",
-		"no-else-return": "error",
-		"typescript/no-inferrable-types": "error",
-		"typescript/prefer-as-const": "error",
-		"unicorn/prefer-number-properties": "error"
-	}
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // This repo is a small Bun/TypeScript CLI tool. It has no DOM, no React, no
+  // framework runtime and no web surface, so the web/frontend plugins (react,
+  // react-hooks, jsx-a11y, react-perf, vue) are absent. vitest/jest are absent
+  // too: tests run on bun:test, which has no oxlint plugin. The `node` plugin
+  // is off because the target runtime is Bun, whose node-compat layer makes
+  // several node-specific rules misreport (e.g. process/buffer usage).
+  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise"],
+  "jsPlugins": [
+    {
+      // anti-slop (upstream dmmulroy/anti-slop, vendored by ultracite — not
+      // published to npm). plugin.mjs is not in ultracite's exports map, so
+      // the specifier has to be a path.
+      "name": "anti-slop",
+      "specifier": "./node_modules/ultracite/config/oxlint/anti-slop/plugin.mjs"
+    }
+  ],
+  "options": {
+    // A disable directive that suppresses nothing is a lie about the code it
+    // sits on. Denying them keeps stale suppressions from accumulating.
+    "reportUnusedDisableDirectives": "deny"
+  },
+  "categories": {
+    "correctness": "error",
+    // `suspicious` and `perf` are clean once the rules below are tuned. `pedantic`
+    // stays off: its rules (max-lines-per-function, max-dependencies, complexity)
+    // police size rather than correctness and this repo does not want them.
+    "suspicious": "error",
+    "perf": "error"
+  },
+  "rules": {
+    // --- ESLint core -----------------------------------------------------
+    "eqeqeq": "error",
+    "no-await-in-loop": "error",
+    "array-callback-return": "error",
+    "no-duplicate-imports": "error",
+    "no-eq-null": "error",
+    "no-promise-executor-return": "error",
+    "no-useless-concat": "error",
+    "object-shorthand": "error",
+    "radix": "error",
+    "no-label-var": "error",
+    "no-self-compare": "error",
+    "no-template-curly-in-string": "error",
+    "default-case-last": "error",
+    "no-unneeded-ternary": "error",
+    "no-useless-rename": "error",
+    "no-lone-blocks": "error",
+    "no-sequences": "error",
+    "prefer-const": "error",
+    "prefer-exponentiation-operator": "error",
+    "no-var": "error",
+    "prefer-object-spread": "error",
+    "preserve-caught-error": "error",
+    "block-scoped-var": "error",
+    "guard-for-in": "error",
+    "no-case-declarations": "error",
+    "no-constructor-return": "error",
+    "no-empty": "error",
+    "no-extend-native": "error",
+    "no-fallthrough": "error",
+    "no-implied-eval": "error",
+    "no-labels": "error",
+    "no-loop-func": "error",
+    "no-multi-str": "error",
+    "no-new-func": "error",
+    "no-new-wrappers": "error",
+    "no-object-constructor": "error",
+    "no-proto": "error",
+    "no-prototype-builtins": "error",
+    "no-regex-spaces": "error",
+    "no-return-assign": "error",
+    "no-script-url": "error",
+    "no-shadow": "error",
+    "no-unmodified-loop-condition": "error",
+    "no-unreachable-loop": "error",
+    "no-useless-call": "error",
+    "prefer-object-has-own": "error",
+    "prefer-regex-literals": "error",
+    // `multi-line` only: a brace-less body on its own line is a footgun,
+    // because oxfmt breaks a long single-line `if` at printWidth without
+    // adding braces. One-line `if (x) return y` stays legal.
+    "curly": ["error", "multi-line"],
+    "no-unexpected-multiline": "off",
+    "no-else-return": ["error", { "allowElseIf": false }],
+    "no-lonely-if": "error",
+    "no-nested-ternary": "error",
+    "no-param-reassign": "error",
+    "prefer-destructuring": ["error", { "array": false }],
+    "prefer-template": "error",
+    "default-param-last": "error",
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    // no-console is intentionally absent: this is a CLI tool whose job is to
+    // print progress to stdout. There is no UI layer to keep free of it.
+    "no-array-constructor": "error",
+    "no-empty-function": "error",
+    "no-unused-expressions": "error",
+    "no-useless-constructor": "error",
+
+    // --- TypeScript (type-aware where noted) ------------------------------
+    "typescript/ban-ts-comment": ["error", { "minimumDescriptionLength": 10 }],
+    "typescript/no-duplicate-enum-values": "error",
+    "typescript/no-dynamic-delete": "error",
+    "typescript/no-empty-object-type": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/no-extra-non-null-assertion": "error",
+    "typescript/no-extraneous-class": "error",
+    "typescript/no-misused-new": "error",
+    "typescript/no-namespace": "error",
+    "typescript/no-non-null-asserted-nullish-coalescing": "error",
+    "typescript/no-non-null-asserted-optional-chain": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-require-imports": "error",
+    "typescript/no-this-alias": "error",
+    // Type-aware. This is the rule that pays for `--type-aware`: it rejects
+    // casts like `JSON.parse(x) as Foo` and `unknownValue as string`, forcing
+    // the code through real narrowing (type guards, indexed access checks).
+    "typescript/no-unnecessary-condition": "error",
+    "typescript/no-unnecessary-type-constraint": "error",
+    "typescript/no-unsafe-declaration-merging": "error",
+    "typescript/no-unsafe-function-type": "error",
+    "typescript/no-wrapper-object-types": "error",
+    // prefer-as-const stays on: the repo uses literal types like `'^' | '~' | ''`
+    // and `as const` on its range-prefix literals. There is no competing rule.
+    "typescript/prefer-as-const": "error",
+    "typescript/prefer-literal-enum-member": "error",
+    "typescript/prefer-namespace-keyword": "error",
+    // Type-aware: `async` functions that never await are just promises that
+    // can't reject usefully.
+    "typescript/require-await": "error",
+    "typescript/triple-slash-reference": "error",
+    "typescript/adjacent-overload-signatures": "error",
+    "typescript/ban-tslint-comment": "error",
+    "typescript/consistent-generic-constructors": "error",
+    "typescript/consistent-indexed-object-style": ["error", "record"],
+    // The repo expresses every object shape as a `type` alias (there is no
+    // declaration merging or class hierarchy to need `interface`), so one style
+    // is enforced to keep it that way.
+    "typescript/consistent-type-definitions": ["error", "type"],
+    "typescript/consistent-type-imports": [
+      "error",
+      { "prefer": "type-imports", "fixStyle": "inline-type-imports" }
+    ],
+    "typescript/no-confusing-non-null-assertion": "error",
+    "typescript/prefer-enum-initializers": "error",
+    "typescript/prefer-for-of": "error",
+    "typescript/prefer-function-type": "error",
+    "typescript/prefer-optional-chain": "error",
+    "typescript/prefer-ts-expect-error": "error",
+    "typescript/no-invalid-void-type": "error",
+    // Type-aware async discipline.
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/await-thenable": "error",
+    "typescript/no-misused-spread": "error",
+    "typescript/no-for-in-array": "error",
+    "typescript/no-array-delete": "error",
+    "typescript/no-mixed-enums": "error",
+    "typescript/no-duplicate-type-constituents": "error",
+    // Type-aware: flags enum-vs-literal comparisons where the literal is not a
+    // member, which is exactly the drift a renamed member leaves behind.
+    "typescript/no-unsafe-enum-comparison": "error",
+    "typescript/unbound-method": "error",
+    "typescript/no-base-to-string": "error",
+    // no-unnecessary-type-assertion stays off: under oxlint-tsgolint it reports
+    // false positives on `await response.json()` results, and applying its fix
+    // can strip a cast that TS2571 then needs back. Re-evaluate on the next
+    // oxlint-tsgolint upgrade.
+    "typescript/return-await": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "typescript/restrict-plus-operands": "error",
+    "typescript/require-array-sort-compare": "error",
+    "typescript/no-unnecessary-boolean-literal-compare": "error",
+    "typescript/use-unknown-in-catch-callback-variable": "error",
+    "typescript/no-unnecessary-template-expression": "error",
+    "typescript/no-deprecated": "error",
+    // consistent-return is on: the two switch-based helpers in git.ts are the
+    // only current hits, and a throwing `default` makes them exhaustive.
+    "typescript/consistent-return": "error",
+    "typescript/no-unnecessary-type-arguments": "error",
+    // The one void-expression style that matters here is the arrow shorthand
+    // (`() => setX(1)`), which is idiomatic, not a confusion.
+    "typescript/no-confusing-void-expression": [
+      "error",
+      { "ignoreArrowShorthand": true }
+    ],
+
+    // --- Unicorn ---------------------------------------------------------
+    "unicorn/catch-error-name": "error",
+    "unicorn/consistent-existence-index-check": "error",
+    "unicorn/filename-case": "error",
+    "unicorn/new-for-builtins": "error",
+    "unicorn/no-abusive-eslint-disable": "error",
+    "unicorn/no-await-in-promise-methods": "error",
+    "unicorn/no-empty-file": "error",
+    // strict, not the default loose strategy: loose skips `Error` itself. The
+    // one `instanceof Error` probe (registry.ts's error normalizer) is exempted
+    // per file below because it is the boundary that narrows an unknown
+    // rejection into a message.
+    "unicorn/no-instanceof-builtins": ["error", { "strategy": "strict" }],
+    "unicorn/no-invalid-fetch-options": "error",
+    "unicorn/no-invalid-remove-event-listener": "error",
+    "unicorn/no-negated-condition": "error",
+    "unicorn/no-new-array": "error",
+    "unicorn/no-single-promise-in-promise-methods": "error",
+    "unicorn/no-thenable": "error",
+    "unicorn/no-typeof-undefined": "error",
+    "unicorn/no-useless-fallback-in-spread": "error",
+    "unicorn/no-useless-promise-resolve-reject": "error",
+    "unicorn/no-useless-spread": "error",
+    "unicorn/no-useless-switch-case": "error",
+    "unicorn/no-useless-undefined": [
+      "error",
+      { "checkArguments": false, "checkArrowFunctionBody": false }
+    ],
+    "unicorn/no-zero-fractions": "error",
+    "unicorn/numeric-separators-style": "error",
+    "unicorn/prefer-array-find": "error",
+    "unicorn/prefer-array-flat-map": "error",
+    "unicorn/prefer-array-some": "error",
+    "unicorn/prefer-date-now": "error",
+    "unicorn/prefer-logical-operator-over-ternary": "error",
+    "unicorn/prefer-native-coercion-functions": "error",
+    "unicorn/prefer-node-protocol": "error",
+    "unicorn/prefer-number-properties": "error",
+    "unicorn/prefer-object-from-entries": "error",
+    "unicorn/prefer-regexp-test": "error",
+    "unicorn/prefer-set-has": "error",
+    "unicorn/prefer-spread": "error",
+    "unicorn/prefer-string-replace-all": "error",
+    "unicorn/prefer-string-slice": "error",
+    "unicorn/require-array-join-separator": "error",
+    "unicorn/switch-case-braces": "error",
+    "unicorn/text-encoding-identifier-case": "error",
+    "unicorn/consistent-date-clone": "error",
+    "unicorn/consistent-empty-array-spread": "error",
+    "unicorn/error-message": "error",
+    "unicorn/no-accessor-recursion": "error",
+    "unicorn/no-array-fill-with-reference-type": "error",
+    "unicorn/no-array-sort": "error",
+    "unicorn/no-await-expression-member": "error",
+    "unicorn/no-confusing-array-with": "error",
+    "unicorn/no-instanceof-array": "error",
+    "unicorn/no-length-as-slice-end": "error",
+    "unicorn/no-magic-array-flat-depth": "error",
+    "unicorn/no-negation-in-equality-check": "error",
+    "unicorn/no-object-as-default-parameter": "error",
+    "unicorn/no-unnecessary-array-splice-count": "error",
+    "unicorn/no-unnecessary-await": "error",
+    "unicorn/no-unnecessary-slice-end": "error",
+    "unicorn/no-unreadable-array-destructuring": "error",
+    "unicorn/no-useless-length-check": "error",
+    // The DOM/Blob/prefer-modern-* rules (prefer-dom-node-*, prefer-classlist-*,
+    // prefer-keyboard-event-key, prefer-blob-reading-methods, ...) are all
+    // absent: there is no DOM in this project.
+    "unicorn/prefer-math-min-max": "error",
+    "unicorn/prefer-modern-math-apis": "error",
+    "unicorn/prefer-set-size": "error",
+    "unicorn/prefer-structured-clone": "error",
+    "unicorn/prefer-type-error": "error",
+    "unicorn/require-number-to-fixed-digits-argument": "error",
+    "unicorn/throw-new-error": "error",
+
+    // --- oxc (language-level) --------------------------------------------
+    "oxc/approx-constant": "error",
+    "oxc/bad-array-method-on-arguments": "error",
+    "oxc/bad-bitwise-operator": "error",
+    "oxc/bad-char-at-comparison": "error",
+    "oxc/bad-comparison-sequence": "error",
+    "oxc/bad-match-all-arg": "error",
+    "oxc/bad-min-max-func": "error",
+    "oxc/bad-object-literal-comparison": "error",
+    "oxc/bad-replace-all-arg": "error",
+    "oxc/branches-sharing-code": "error",
+    "oxc/const-comparisons": "error",
+    "oxc/double-comparisons": "error",
+    "oxc/erasing-op": "error",
+    "oxc/misrefactored-assign-op": "error",
+    "oxc/missing-throw": "error",
+    "oxc/no-accumulating-spread": "error",
+    "oxc/number-arg-out-of-range": "error",
+    "oxc/only-used-in-recursion": "error",
+    "oxc/uninvoked-array-callback": "error",
+
+    // --- import -----------------------------------------------------------
+    // Matches the `inline-type-imports` fixStyle on consistent-type-imports, so
+    // both halves of the type-import style are enforced.
+    "import/consistent-type-specifier-style": ["error", "prefer-inline"],
+    "import/no-absolute-path": "error",
+    "import/no-cycle": "error",
+    "import/no-duplicates": "error",
+    "import/no-empty-named-blocks": "error",
+    "import/no-mutable-exports": "error",
+    "import/no-named-as-default": "error",
+    "import/no-self-import": "error",
+    // Every import here is a real dependency of a module; there are no
+    // stylesheet/font side-effect imports to allow.
+    "import/no-unassigned-import": "error",
+
+    // --- promise -----------------------------------------------------------
+    "promise/always-return": "error",
+    "promise/no-callback-in-promise": "error",
+    "promise/no-multiple-resolved": "error",
+    "promise/no-nesting": "error",
+    "promise/no-new-statics": "error",
+    "promise/no-promise-in-callback": "error",
+    "promise/no-return-wrap": "error",
+    "promise/param-names": "error",
+    "promise/prefer-catch": "error",
+    "promise/spec-only": "error",
+    "promise/valid-params": "error",
+
+    // --- anti-slop (vendored by ultracite) ---------------------------------
+    // The same rule family the strict config elsewhere turns on. Combined with
+    // zod for boundary parsing, the codebase has almost no type assertions or
+    // runtime typeof probes left, so these rules mostly act as a tripwire.
+    "anti-slop/no-chained-type-assertions": "error",
+    "anti-slop/no-conditional-empty-object-spread": "error",
+    "anti-slop/no-known-value-widening": "error",
+    "anti-slop/no-module-mocking": "error",
+    "anti-slop/no-object-parameters": "error",
+    "anti-slop/no-reflect-apply": "error",
+    "anti-slop/no-reflect-get": "error",
+    "anti-slop/no-runtime-typeof": "error",
+    "anti-slop/no-shape-in-symbol-names": "error",
+    "anti-slop/no-unknown-parameters": "error",
+    "anti-slop/no-unknown-returns": "error",
+    "anti-slop/no-unknown-type-aliases": "error",
+    "anti-slop/no-unsafe-dictionary-type": "error",
+    "anti-slop/no-widen-then-assert": "error",
+    "anti-slop/require-safety-comment-for-type-assertion": "error"
+  },
+  "overrides": [
+    {
+      // src/registry.ts is the network boundary of this CLI: its error normalizer
+      // is the one place an unknown rejection is narrowed into a message, and
+      // reading `.stack` off an `Error` is the entire point of that boundary.
+      "files": ["src/registry.ts"],
+      "rules": {
+        "unicorn/no-instanceof-builtins": "off"
+      }
+    },
+    {
+      // Tests: assertions on `result[0]!` are the idiomatic way to read a
+      // known-present index under noUncheckedIndexedAccess.
+      "files": ["test/**"],
+      "rules": {
+        "typescript/no-non-null-assertion": "off"
+      }
+    }
+  ]
 }

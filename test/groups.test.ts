@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { assignToGroups, shouldIgnore } from '../src/groups'
-import type { UpdateCandidate } from '../src/types'
+import { type UpdateCandidate } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string; changeType: UpdateCandidate['changeType'] }): UpdateCandidate {
   return {

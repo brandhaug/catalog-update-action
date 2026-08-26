@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { parseFixedVersion, computeOverrides, buildOverridePrBody, isOverrideBranchOutdated, buildOverrideBranchUpdate, overrideKey, isToolOverrideKey } from '../src/audit'
-import type { AuditAdvisory, AuditResult, OverrideEntry, Severity } from '../src/types'
+import { type AuditAdvisory, type AuditResult, type OverrideEntry } from '../src/types'
 
 function makeAdvisory(overrides: Partial<AuditAdvisory> = {}): AuditAdvisory {
   return {
     id: 1234,
     url: 'https://github.com/advisories/GHSA-1234',
     title: 'Test Advisory',
-    severity: 'high' as Severity,
+    severity: 'high',
     vulnerable_versions: '<1.0.0',
     cwe: ['CWE-79'],
     cvss: { score: 7.5, vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N' },
@@ -145,7 +145,7 @@ describe('computeOverrides', () => {
     })
 
     expect(result).toHaveLength(2)
-    const sorted = [...result].sort((a, b) => a.vulnerableRange.localeCompare(b.vulnerableRange))
+    const sorted = [...result].toSorted((a, b) => a.vulnerableRange.localeCompare(b.vulnerableRange))
     expect(sorted[0]!.vulnerableRange).toBe('>=7.0.0 <7.5.10')
     expect(sorted[0]!.fixedVersion).toBe('7.5.10')
     expect(overrideKey(sorted[0]!)).toBe('ws@>=7.0.0 <7.5.10')
@@ -316,18 +316,18 @@ describe('buildOverrideBranchUpdate', () => {
       branchPrefix: 'catalog-update'
     })
 
-    const pkg: Record<string, unknown> = {
+const pkg = {
       overrides: {
-        'minimist@<1.2.6': '1.2.6',  // stale tool override — should be removed
-        'some-package': '1.0.0'        // user override — should be preserved
+        'minimist@<1.2.6': '1.2.6', // stale tool override — should be removed
+        'some-package': '1.0.0' // user override — should be preserved
       }
     }
     result.applyChanges(pkg)
 
-    const applied = pkg.overrides as Record<string, string>
-    expect(applied['lodash@<4.17.21']).toBe('4.17.21')
-    expect(applied['minimist@<1.2.6']).toBeUndefined()
-    expect(applied['some-package']).toBe('1.0.0')
+    expect(pkg.overrides).toEqual({
+      'lodash@<4.17.21': '4.17.21',
+      'some-package': '1.0.0'
+    })
   })
 
   test('applyChanges removes overrides field when empty', () => {
@@ -336,7 +336,7 @@ describe('buildOverrideBranchUpdate', () => {
       branchPrefix: 'catalog-update'
     })
 
-    const pkg: Record<string, unknown> = { overrides: { 'minimist@<1.2.6': '1.2.6' } }
+    const pkg = { overrides: { 'minimist@<1.2.6': '1.2.6' } }
     result.applyChanges(pkg)
 
     expect(pkg.overrides).toBeUndefined()

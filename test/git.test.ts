@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { buildCatalogValue, buildCatalogPrBody, buildCatalogBranchUpdate } from '../src/git'
-import type { Config, UpdateCandidate, VersionReleaseNote } from '../src/types'
+import { type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
   return {
@@ -174,11 +174,10 @@ describe('buildCatalogBranchUpdate', () => {
       releaseNotes: new Map()
     })
 
-    const pkg: Record<string, unknown> = { catalog: { react: '18.0.0', zod: '3.0.0' } }
+    const pkg = { catalog: { react: '18.0.0', zod: '3.0.0' } }
     result.applyChanges(pkg)
 
-    expect((pkg.catalog as Record<string, string>).react).toBe('19.0.0')
-    expect((pkg.catalog as Record<string, string>).zod).toBe('3.0.0')
+    expect(pkg.catalog).toEqual({ react: '19.0.0', zod: '3.0.0' })
   })
 
   test('applyChanges throws when catalog missing', () => {
@@ -190,7 +189,7 @@ describe('buildCatalogBranchUpdate', () => {
       releaseNotes: new Map()
     })
 
-    const pkg: Record<string, unknown> = {}
+    const pkg = {}
     expect(() => result.applyChanges(pkg)).toThrow('No valid catalog found')
   })
 
