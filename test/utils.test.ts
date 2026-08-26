@@ -236,14 +236,18 @@ describe('getIntermediateVersions', () => {
     expect(result).toEqual(['1.2.0', '1.1.0'])
   })
 
-  test('respects maxVersions limit', () => {
+  test('caps at 10 intermediate versions', () => {
+    const publishedVersions = Array.from(
+      { length: 15 },
+      (_, i) => `1.0.${i + 1}`
+    )
     const result = getIntermediateVersions({
-      publishedVersions: ['1.0.0', '1.0.1', '1.0.2', '1.0.3', '1.0.4'],
+      publishedVersions,
       currentVersion: '1.0.0',
-      latestVersion: '1.0.4',
-      maxVersions: 2
+      latestVersion: '1.0.15'
     })
-    expect(result).toEqual(['1.0.4', '1.0.3'])
+    expect(result).toHaveLength(10)
+    expect(result[0]).toBe('1.0.15')
   })
 
   test('falls back to latest when no intermediate versions found', () => {

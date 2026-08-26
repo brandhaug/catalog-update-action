@@ -13,12 +13,10 @@ describe('parseCatalog', () => {
     expect(entries).toHaveLength(2)
     expect(entries[0]).toEqual({
       name: 'react',
-      raw: '19.0.0',
       npmName: 'react',
       currentVersion: '19.0.0',
       rangePrefix: "",
-      isAlias: false,
-      aliasName: null
+      isAlias: false
     })
   })
 
@@ -50,12 +48,10 @@ describe('parseCatalog', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0]).toEqual({
       name: 'vite',
-      raw: 'npm:rolldown-vite@7.3.1',
       npmName: 'rolldown-vite',
       currentVersion: '7.3.1',
       rangePrefix: "",
-      isAlias: true,
-      aliasName: 'rolldown-vite'
+      isAlias: true
     })
   })
 

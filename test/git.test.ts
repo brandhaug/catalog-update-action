@@ -4,14 +4,12 @@ import { type Config, type UpdateCandidate, type VersionReleaseNote } from '../s
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
   return {
-    raw: overrides.name,
     npmName: overrides.name,
     currentVersion: '1.0.0',
     latestVersion: '2.0.0',
     changeType: 'major',
     rangePrefix: "",
     isAlias: false,
-    aliasName: null,
     ...overrides
   }
 }
@@ -61,7 +59,7 @@ describe('buildCatalogValue', () => {
         name: 'vite',
         latestVersion: '7.4.0',
         isAlias: true,
-        aliasName: 'rolldown-vite'
+        npmName: 'rolldown-vite'
       })
     })
     expect(result).toBe('npm:rolldown-vite@7.4.0')
@@ -73,7 +71,7 @@ describe('buildCatalogValue', () => {
         name: 'vite',
         latestVersion: '7.4.0',
         isAlias: true,
-        aliasName: 'rolldown-vite',
+        npmName: 'rolldown-vite',
         rangePrefix: "^"
       })
     })

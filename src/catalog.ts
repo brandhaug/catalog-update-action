@@ -28,12 +28,10 @@ export function parseCatalog({
 
 			entries.push({
 				name,
-				raw,
 				npmName: aliasNpmName,
 				currentVersion: cleanVersion,
 				rangePrefix: aliasPrefix,
-				isAlias: true,
-				aliasName: aliasNpmName
+				isAlias: true
 			})
 			continue
 		}
@@ -46,12 +44,10 @@ export function parseCatalog({
 
 		entries.push({
 			name,
-			raw,
 			npmName: name,
 			currentVersion: version,
 			rangePrefix,
-			isAlias: false,
-			aliasName: null
+			isAlias: false
 		})
 	}
 

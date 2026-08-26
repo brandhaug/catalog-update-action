@@ -4,13 +4,11 @@ import { type UpdateCandidate } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string; changeType: UpdateCandidate['changeType'] }): UpdateCandidate {
   return {
-    raw: overrides.name,
     npmName: overrides.name,
     currentVersion: '1.0.0',
     latestVersion: '2.0.0',
     rangePrefix: "",
     isAlias: false,
-    aliasName: null,
     ...overrides
   }
 }
@@ -178,6 +176,21 @@ describe('assignToGroups', () => {
     const result = assignToGroups({ candidates, groups: [] })
 
     expect(result.size).toBe(0)
+  })
+
+  test('does not collapse patch-only groups when all-patch-updates is not configured', () => {
+    const candidates = [
+      makeCandidate({ name: '@sentry/react', changeType: 'patch' }),
+      makeCandidate({ name: '@sentry/browser', changeType: 'patch' })
+    ]
+
+    const result = assignToGroups({
+      candidates,
+      groups: [{ name: 'sentry', patterns: ['@sentry/*'], updateTypes: null }]
+    })
+
+    expect(result.has('all-patch-updates')).toBe(false)
+    expect(result.get('sentry')).toHaveLength(2)
   })
 
   test('collapses release-only groups into all-patch-updates', () => {

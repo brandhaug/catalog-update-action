@@ -98,7 +98,7 @@ export function buildCatalogValue({
 	update: UpdateCandidate
 }): string {
 	if (update.isAlias) {
-		return `npm:${update.aliasName}@${update.rangePrefix}${update.latestVersion}`
+		return `npm:${update.npmName}@${update.rangePrefix}${update.latestVersion}`
 	}
 	return `${update.rangePrefix}${update.latestVersion}`
 }
@@ -190,9 +190,7 @@ export async function getExistingPrs({
 			'--search',
 			`head:${branchPrefix}`,
 			'--json',
-			'headRefName,number,mergeable,title',
-			'--limit',
-			'100'
+			'headRefName,number,mergeable,title'
 		],
 		cwd
 	})

@@ -18,6 +18,9 @@ import {
 const RELEASE_NOTES_MAX_LENGTH = 2000
 const COMBINED_RELEASE_NOTES_MAX_LENGTH = 5000
 
+/** Per-request timeout applied to every retry attempt. */
+const REQUEST_TIMEOUT_MS = 15_000
+
 /** Shape of the npm registry `install-v1` response for a package. */
 const npmRegistryResponseSchema = z.object({
 	'dist-tags': z.object({ latest: z.string() }).optional(),
@@ -47,12 +50,18 @@ async function fetchWithRetry(
 	retries = 1
 ): Promise<Response> {
 	let lastError: unknown
+	// A fresh timeout signal is created per attempt: once an AbortSignal has
+	// aborted it stays aborted, so reusing one across retries would make every
+	// attempt after the first time-out reject immediately with AbortError.
 	// Retries are inherently sequential: each attempt must settle before the
 	// next backoff runs, so the awaits in this loop are intentional.
 	/* oxlint-disable no-await-in-loop */
 	for (let attempt = 0; attempt <= retries; attempt++) {
 		try {
-			const response = await fetch(url, init)
+			const response = await fetch(url, {
+				...init,
+				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+			})
 			if (response.ok || attempt === retries) return response
 			if (response.status === 429 || response.status >= 500) {
 				await Bun.sleep(1000 * (attempt + 1))
@@ -107,8 +116,7 @@ export async function queryNpmRegistry({
 				const response = await fetchWithRetry(
 					`https://registry.npmjs.org/${encodedName}`,
 					{
-						headers: { Accept: 'application/vnd.npm.install-v1+json' },
-						signal: AbortSignal.timeout(15_000)
+						headers: { Accept: 'application/vnd.npm.install-v1+json' }
 					}
 				)
 
@@ -322,8 +330,7 @@ export async function queryPackageMetadata({
 				const response = await fetchWithRetry(
 					`https://registry.npmjs.org/${encodedName}`,
 					{
-						headers: { Accept: 'application/json' },
-						signal: AbortSignal.timeout(15_000)
+						headers: { Accept: 'application/json' }
 					}
 				)
 
@@ -410,7 +417,7 @@ export async function queryReleaseNotes({
 				await withSemaphore(semaphore, async () => {
 					const response = await fetchWithRetry(
 						`https://api.github.com/repos/${repo.owner}/${repo.repo}/releases?per_page=100`,
-						{ headers, signal: AbortSignal.timeout(15_000) }
+						{ headers }
 					)
 					if (!response.ok) return
 

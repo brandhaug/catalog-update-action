@@ -756,6 +756,13 @@ async function main(): Promise<void> {
 	}
 	/* oxlint-enable no-await-in-loop */
 
+	// Restore the branch the run started on, so CLI users are not left parked
+	// on the default branch after a successful run. In CI the checkout may be
+	// detached (no current branch); only restore when there is one to return to.
+	if (startBranch) {
+		await exec({ command: ['git', 'checkout', startBranch], cwd })
+	}
+
 	// 3. Summary
 	if (!dryRun) {
 		const total = totalCreated + totalFailed

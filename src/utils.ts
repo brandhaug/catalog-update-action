@@ -129,6 +129,11 @@ export function compareSemver({ a, b }: { a: string; b: string }): number {
 	return comparePrerelease(pa.prerelease, pb.prerelease)
 }
 
+/** Descending semver comparator (newest first). */
+function compareSemverDescending(a: string, b: string): number {
+	return compareSemver({ a: b, b: a })
+}
+
 /** Parse version from GitHub release tag formats: v1.2.3, 1.2.3, name@1.2.3, @scope/name@1.2.3 */
 export function extractVersionFromTag({ tag }: { tag: string }): string | null {
 	const atMatch = tag.match(/@(\d+\.\d+\.\d+.*)$/)
@@ -138,22 +143,23 @@ export function extractVersionFromTag({ tag }: { tag: string }): string | null {
 	return null
 }
 
+/** Maximum number of intermediate versions included in release notes. */
+const INTERMEDIATE_VERSIONS_CAP = 10
+
 /**
  * Return versions where current < version <= latest, sorted descending (newest first).
- * Excludes pre-releases unless `includePrerelease` is set. Caps at maxVersions.
+ * Excludes pre-releases unless `includePrerelease` is set. Caps at 10 versions.
  * Falls back to [latestVersion] if no intermediate versions found.
  */
 export function getIntermediateVersions({
 	publishedVersions,
 	currentVersion,
 	latestVersion,
-	maxVersions = 10,
 	includePrerelease = false
 }: {
 	publishedVersions: string[]
 	currentVersion: string
 	latestVersion: string
-	maxVersions?: number
 	includePrerelease?: boolean
 }): string[] {
 	const intermediate = publishedVersions
@@ -165,8 +171,8 @@ export function getIntermediateVersions({
 				compareSemver({ a: v, b: latestVersion }) <= 0
 			)
 		})
-		.toSorted((a, b) => compareSemver({ a: b, b: a }))
-		.slice(0, maxVersions)
+		.toSorted(compareSemverDescending)
+		.slice(0, INTERMEDIATE_VERSIONS_CAP)
 
 	if (intermediate.length === 0) return [latestVersion]
 	return intermediate

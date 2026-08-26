@@ -53,8 +53,12 @@ export function assignToGroups({
 		}
 	}
 
-	// Collapse patch-only groups into all-patch-updates to reduce PR noise
+	// Collapse patch-only groups into all-patch-updates to reduce PR noise,
+	// but only when the user actually configured a catch-all group: a patch-only
+	// group keeps its own PR otherwise instead of being funneled into a phantom
+	// catch-all the user never defined.
 	const CATCH_ALL = 'all-patch-updates'
+	const catchAllConfigured = groups.some((group) => group.name === CATCH_ALL)
 	for (const [groupName, members] of result) {
 		if (groupName === CATCH_ALL) continue
 		const hasMajorOrMinor = members.some(
@@ -64,6 +68,7 @@ export function assignToGroups({
 				m.changeType !== 'release'
 		)
 		if (hasMajorOrMinor) continue
+		if (!catchAllConfigured) continue
 
 		const patchGroup = result.get(CATCH_ALL) ?? []
 		patchGroup.push(...members)

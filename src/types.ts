@@ -77,8 +77,6 @@ export type AuditConfig = {
 
 export type CatalogEntry = {
 	name: string
-	/** The raw value from catalog (may include `npm:` alias or `^` prefix) */
-	raw: string
 	/** The actual npm package name to query (resolved from `npm:` aliases) */
 	npmName: string
 	/** Current version without range prefix */
@@ -87,8 +85,6 @@ export type CatalogEntry = {
 	rangePrefix: '^' | '~' | ''
 	/** Whether this is an `npm:` alias (e.g., `npm:rolldown-vite@7.3.1`) */
 	isAlias: boolean
-	/** The alias package name if isAlias (e.g., `rolldown-vite`) */
-	aliasName: string | null
 }
 
 export type UpdateCandidate = CatalogEntry & {
