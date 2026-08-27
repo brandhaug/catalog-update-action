@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.12.1](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.12.0...catalog-update-action-v0.12.1) (2026-08-27)
+
+
+### Documentation
+
+* refresh and trim AGENTS.md ([#16](https://github.com/brandhaug/catalog-update-action/issues/16)) ([957a80d](https://github.com/brandhaug/catalog-update-action/commit/957a80d20e18d5c79c4f92157429da6f46027c0d))
+* refresh and trim README ([#15](https://github.com/brandhaug/catalog-update-action/issues/15)) ([cc15db6](https://github.com/brandhaug/catalog-update-action/commit/cc15db6171c59b98adc92ce7820afc6da98beea2))
+
+
+### Miscellaneous
+
+* align tooling with canonical setup ([#18](https://github.com/brandhaug/catalog-update-action/issues/18)) ([1d1f29f](https://github.com/brandhaug/catalog-update-action/commit/1d1f29f7b1527db3ab2f9f14246b83560db7f283))
+* **deps:** bump oxfmt from 0.64.0 to 0.65.0 ([#19](https://github.com/brandhaug/catalog-update-action/issues/19)) ([176a447](https://github.com/brandhaug/catalog-update-action/commit/176a44778fb40c863c2a58e31aa82fdfc58482a4))
+
+
+### Code Refactoring
+
+* harden lint config, migrate parsing to zod, and apply code review fixes ([#17](https://github.com/brandhaug/catalog-update-action/issues/17)) ([134abce](https://github.com/brandhaug/catalog-update-action/commit/134abce68c95c7acbcee175f7e16ea054fdf07c0))
+
 ## [0.12.0](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.11.0...catalog-update-action-v0.12.0) (2026-08-24)
 
 
