@@ -3,6 +3,7 @@ name: Release
 on:
   push:
     branches: [master]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,10 +18,13 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
+        with:
+          token: ${{ secrets.CI_PAT }}
+          config-file: release-please-config.json
 
   publish:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created }}
+    if: needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -28,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 'lts/*'
           registry-url: https://registry.npmjs.org
 
       - run: npm publish --provenance --access public

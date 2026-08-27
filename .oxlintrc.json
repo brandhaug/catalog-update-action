@@ -17,6 +17,9 @@
     }
   ],
   "options": {
+    // Type-aware linting for bare `oxlint` runs too, matching the
+    // `--type-aware` flag used in the lint script.
+    "typeAware": true,
     // A disable directive that suppresses nothing is a lie about the code it
     // sits on. Denying them keeps stale suppressions from accumulating.
     "reportUnusedDisableDirectives": "deny"
