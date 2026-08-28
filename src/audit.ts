@@ -100,7 +100,7 @@ export function parseFixedVersion({
 }: {
 	vulnerableVersions: string
 }): string | null {
-	const strictBounds: string[] = []
+	const strictBounds: Array<string> = []
 	// Matches `<` followed immediately by a semver version (digit).
 	// This naturally excludes `<=` since `=` is not a digit.
 	const regex = /<(\d+\.\d+\.\d+(?:-[\w.]+)?)/g
@@ -108,11 +108,17 @@ export function parseFixedVersion({
 
 	while ((m = regex.exec(vulnerableVersions)) !== null) {
 		const bound = m[1]
-		if (bound !== undefined) strictBounds.push(bound)
+		if (bound !== undefined) {
+			strictBounds.push(bound)
+		}
 	}
 
-	if (strictBounds.length === 0) return null
-	if (strictBounds.length === 1) return strictBounds[0] ?? null
+	if (strictBounds.length === 0) {
+		return null
+	}
+	if (strictBounds.length === 1) {
+		return strictBounds[0] ?? null
+	}
 
 	return strictBounds.reduce((highest, v) =>
 		compareSemver({ a: v, b: highest }) > 0 ? v : highest
@@ -154,22 +160,28 @@ export function computeOverrides({
 	catalogNames: Set<string>
 	minimumSeverity: Severity
 	existingOverrides: Record<string, string>
-}): OverrideEntry[] {
+}): Array<OverrideEntry> {
 	const minLevel = SEVERITY_ORDER[minimumSeverity]
 
 	// Group by (packageName, vulnerable_versions) — each unique pair becomes one override entry
 	const groupMap = new Map<string, OverrideEntry>()
 
 	for (const [packageName, advisories] of Object.entries(auditResult)) {
-		if (catalogNames.has(packageName)) continue
+		if (catalogNames.has(packageName)) {
+			continue
+		}
 
 		for (const advisory of advisories) {
-			if (SEVERITY_ORDER[advisory.severity] < minLevel) continue
+			if (SEVERITY_ORDER[advisory.severity] < minLevel) {
+				continue
+			}
 
 			const fixed = parseFixedVersion({
 				vulnerableVersions: advisory.vulnerable_versions
 			})
-			if (!fixed) continue
+			if (!fixed) {
+				continue
+			}
 
 			const groupKey = overrideKey({
 				packageName,
@@ -194,7 +206,7 @@ export function computeOverrides({
 		}
 	}
 
-	const entries: OverrideEntry[] = []
+	const entries: Array<OverrideEntry> = []
 
 	for (const group of groupMap.values()) {
 		const existingVersion = existingOverrides[overrideKey(group)]
@@ -221,7 +233,7 @@ export function computeOverrides({
 export function buildOverridePrBody({
 	overrides
 }: {
-	overrides: OverrideEntry[]
+	overrides: Array<OverrideEntry>
 }): string {
 	const sorted = [...overrides].toSorted(
 		(a, b) =>
@@ -246,38 +258,32 @@ export function buildOverridePrBody({
 
 	// Advisory details in collapsible sections
 	for (const override of sorted) {
-		lines.push(`<details>`)
 		lines.push(
-			`<summary>${override.packageName} — ${override.advisories.length} advisory(ies)</summary>`
+			`<details>`,
+			`<summary>${override.packageName} — ${override.advisories.length} advisory(ies)</summary>`,
+			''
 		)
-		lines.push('')
 		for (const advisory of override.advisories) {
-			lines.push(`### ${advisory.title}`)
 			lines.push(
-				`- **Severity**: ${advisory.severity} (CVSS ${advisory.cvss.score})`
-			)
-			lines.push(
+				`### ${advisory.title}`,
+				`- **Severity**: ${advisory.severity} (CVSS ${advisory.cvss.score})`,
 				`- **Vulnerable versions**: \`${advisory.vulnerable_versions}\``
 			)
 			if (advisory.cwe.length > 0) {
 				lines.push(`- **CWE**: ${advisory.cwe.join(', ')}`)
 			}
-			lines.push(`- **Advisory**: ${advisory.url}`)
-			lines.push('')
+			lines.push(`- **Advisory**: ${advisory.url}`, '')
 		}
-		lines.push('</details>')
-		lines.push('')
+		lines.push('</details>', '')
 	}
 
 	lines.push(
-		`> Override entries are added to \`package.json#overrides\` to pin transitive dependencies to patched versions.`
+		`> Override entries are added to \`package.json#overrides\` to pin transitive dependencies to patched versions.`,
+		`> See [Bun overrides documentation](https://bun.sh/docs/install/overrides) for details.`,
+		'',
+		'---',
+		PR_FOOTER
 	)
-	lines.push(
-		`> See [Bun overrides documentation](https://bun.sh/docs/install/overrides) for details.`
-	)
-	lines.push('')
-	lines.push('---')
-	lines.push(PR_FOOTER)
 
 	return lines.join('\n')
 }
@@ -291,7 +297,7 @@ export function buildOverrideBranchUpdate({
 	branchPrefix,
 	titleSuffix = ''
 }: {
-	overrides: OverrideEntry[]
+	overrides: Array<OverrideEntry>
 	branchPrefix: string
 	titleSuffix?: string
 }): BranchUpdate {
@@ -339,20 +345,26 @@ export function isOverrideBranchOutdated({
 	expectedOverrides
 }: {
 	branchPackageJson: PackageJson
-	expectedOverrides: OverrideEntry[]
+	expectedOverrides: Array<OverrideEntry>
 }): boolean {
 	const overrides = readStringRecord(branchPackageJson.overrides)
-	if (!overrides) return expectedOverrides.length > 0
+	if (!overrides) {
+		return expectedOverrides.length > 0
+	}
 
 	// Check all expected overrides are present with correct versions
 	for (const entry of expectedOverrides) {
-		if (overrides[overrideKey(entry)] !== entry.fixedVersion) return true
+		if (overrides[overrideKey(entry)] !== entry.fixedVersion) {
+			return true
+		}
 	}
 
 	// Check for stale tool-generated overrides that are no longer needed
 	const expectedKeys = new Set(expectedOverrides.map((e) => overrideKey(e)))
 	for (const key of Object.keys(overrides)) {
-		if (isToolOverrideKey(key) && !expectedKeys.has(key)) return true
+		if (isToolOverrideKey(key) && !expectedKeys.has(key)) {
+			return true
+		}
 	}
 
 	return false

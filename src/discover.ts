@@ -11,15 +11,19 @@ export async function discoverCatalogDirectories({
 	excludePatterns
 }: {
 	cwd: string
-	excludePatterns: string[]
-}): Promise<string[]> {
+	excludePatterns: Array<string>
+}): Promise<Array<string>> {
 	const glob = new Bun.Glob('**/package.json')
-	const directories: string[] = []
+	const directories: Array<string> = []
 
 	for await (const path of glob.scan({ cwd, dot: false })) {
 		// Skip node_modules and dotfile directories (e.g. .github, .devcontainer)
-		if (path.includes('node_modules')) continue
-		if (path.split('/').some((segment) => segment.startsWith('.'))) continue
+		if (path.includes('node_modules')) {
+			continue
+		}
+		if (path.split('/').some((segment) => segment.startsWith('.'))) {
+			continue
+		}
 
 		const dir =
 			path === 'package.json' ? '.' : path.replace(/\/package\.json$/, '')

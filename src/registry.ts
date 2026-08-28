@@ -62,7 +62,9 @@ async function fetchWithRetry(
 				...init,
 				signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
 			})
-			if (response.ok || attempt === retries) return response
+			if (response.ok || attempt === retries) {
+				return response
+			}
 			if (response.status === 429 || response.status >= 500) {
 				await Bun.sleep(1000 * (attempt + 1))
 				continue
@@ -104,7 +106,7 @@ export async function queryNpmRegistry({
 	entries,
 	semaphore
 }: {
-	entries: CatalogEntry[]
+	entries: Array<CatalogEntry>
 	semaphore: Semaphore
 }): Promise<Map<string, string>> {
 	const results = new Map<string, string>()
@@ -130,7 +132,9 @@ export async function queryNpmRegistry({
 				const parsed = npmRegistryResponseSchema.safeParse(
 					await response.json()
 				)
-				if (!parsed.success) return
+				if (!parsed.success) {
+					return
+				}
 				const data = parsed.data
 
 				if (parseSemver({ version: entry.currentVersion })?.prerelease) {
@@ -138,13 +142,19 @@ export async function queryNpmRegistry({
 					const allVersions = data.versions ? Object.keys(data.versions) : []
 					let best: string | null = null
 					for (const v of allVersions) {
-						if (!parseSemver({ version: v })) continue
+						if (!parseSemver({ version: v })) {
+							continue
+						}
 						if (compareSemver({ a: entry.currentVersion, b: v }) >= 0) {
 							continue
 						}
-						if (!best || compareSemver({ a: best, b: v }) < 0) best = v
+						if (!best || compareSemver({ a: best, b: v }) < 0) {
+							best = v
+						}
 					}
-					if (best) results.set(entry.name, best)
+					if (best) {
+						results.set(entry.name, best)
+					}
 				} else {
 					// Stable entry: use dist-tags.latest, reject prereleases
 					const latest = data['dist-tags']?.latest
@@ -177,7 +187,9 @@ export function getVersionAgeDays({
 	now: Date
 }): number | null {
 	const publishDate = new Date(publishTime)
-	if (Number.isNaN(publishDate.getTime())) return null
+	if (Number.isNaN(publishDate.getTime())) {
+		return null
+	}
 	return (now.getTime() - publishDate.getTime()) / (1000 * 60 * 60 * 24)
 }
 
@@ -193,14 +205,16 @@ export function filterByReleaseAge({
 	minReleaseAgeDays,
 	now = new Date()
 }: {
-	candidates: UpdateCandidate[]
+	candidates: Array<UpdateCandidate>
 	packageMetadata: Map<string, PackageMetadata>
 	minReleaseAgeDays: number
 	now?: Date
-}): UpdateCandidate[] {
-	if (minReleaseAgeDays <= 0) return candidates
+}): Array<UpdateCandidate> {
+	if (minReleaseAgeDays <= 0) {
+		return candidates
+	}
 
-	const filtered: UpdateCandidate[] = []
+	const filtered: Array<UpdateCandidate> = []
 
 	for (const candidate of candidates) {
 		const metadata = packageMetadata.get(candidate.name)
@@ -263,7 +277,7 @@ function findBestQualifyingVersion({
 	now
 }: {
 	currentVersion: string
-	publishedVersions: string[]
+	publishedVersions: Array<string>
 	publishTimes: Record<string, string>
 	minReleaseAgeDays: number
 	isPrerelease: boolean
@@ -273,18 +287,28 @@ function findBestQualifyingVersion({
 
 	for (const version of publishedVersions) {
 		// Skip pre-releases unless current is pre-release
-		if (!isPrerelease && version.includes('-')) continue
-		if (!parseSemver({ version })) continue
+		if (!isPrerelease && version.includes('-')) {
+			continue
+		}
+		if (!parseSemver({ version })) {
+			continue
+		}
 
 		// Must be an upgrade from current
-		if (compareSemver({ a: currentVersion, b: version }) >= 0) continue
+		if (compareSemver({ a: currentVersion, b: version }) >= 0) {
+			continue
+		}
 
 		// Must meet the age requirement
 		const publishTime = publishTimes[version]
-		if (!publishTime) continue
+		if (!publishTime) {
+			continue
+		}
 
 		const ageDays = getVersionAgeDays({ publishTime, now })
-		if (ageDays === null || ageDays < minReleaseAgeDays) continue
+		if (ageDays === null || ageDays < minReleaseAgeDays) {
+			continue
+		}
 
 		// Keep the newest qualifying version
 		if (!best || compareSemver({ a: best, b: version }) < 0) {
@@ -303,7 +327,9 @@ function parseGitHubRepo({ url }: { url: string }): GitHubRepo | null {
 	const match = url.match(
 		/github\.com[/:]([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+?)(?:\.git)?$/
 	)
-	if (!match?.[1] || !match[2]) return null
+	if (!match?.[1] || !match[2]) {
+		return null
+	}
 	return { owner: match[1], repo: match[2] }
 }
 
@@ -311,7 +337,7 @@ export async function queryPackageMetadata({
 	candidates,
 	semaphore
 }: {
-	candidates: UpdateCandidate[]
+	candidates: Array<UpdateCandidate>
 	semaphore: Semaphore
 }): Promise<Map<string, PackageMetadata>> {
 	const results = new Map<string, PackageMetadata>()
@@ -334,12 +360,16 @@ export async function queryPackageMetadata({
 					}
 				)
 
-				if (!response.ok) return
+				if (!response.ok) {
+					return
+				}
 
 				const parsed = npmMetadataResponseSchema.safeParse(
 					await response.json()
 				)
-				if (!parsed.success) return
+				if (!parsed.success) {
+					return
+				}
 				const data = parsed.data
 
 				const repoUrl = data.repository?.url
@@ -379,11 +409,11 @@ export async function queryReleaseNotes({
 	packageMetadata,
 	semaphore
 }: {
-	candidates: UpdateCandidate[]
+	candidates: Array<UpdateCandidate>
 	packageMetadata: Map<string, PackageMetadata>
 	semaphore: Semaphore
-}): Promise<Map<string, VersionReleaseNote[]>> {
-	const results = new Map<string, VersionReleaseNote[]>()
+}): Promise<Map<string, Array<VersionReleaseNote>>> {
+	const results = new Map<string, Array<VersionReleaseNote>>()
 	const githubToken = process.env.GITHUB_TOKEN
 	const headers: Record<string, string> = {}
 	headers.Accept = 'application/vnd.github+json'
@@ -393,12 +423,14 @@ export async function queryReleaseNotes({
 
 	const repoToCandidates = new Map<
 		string,
-		{ repo: GitHubRepo; candidates: UpdateCandidate[] }
+		{ repo: GitHubRepo; candidates: Array<UpdateCandidate> }
 	>()
 
 	for (const candidate of candidates) {
 		const metadata = packageMetadata.get(candidate.name)
-		if (!metadata?.repo) continue
+		if (!metadata?.repo) {
+			continue
+		}
 		const key = repoKey(metadata.repo)
 		const existing = repoToCandidates.get(key)
 		if (existing) {
@@ -419,10 +451,14 @@ export async function queryReleaseNotes({
 						`https://api.github.com/repos/${repo.owner}/${repo.repo}/releases?per_page=100`,
 						{ headers }
 					)
-					if (!response.ok) return
+					if (!response.ok) {
+						return
+					}
 
 					const parsed = githubReleasesSchema.safeParse(await response.json())
-					if (!parsed.success) return
+					if (!parsed.success) {
+						return
+					}
 					const releases = parsed.data
 
 					const genericReleases = new Map<
@@ -436,9 +472,13 @@ export async function queryReleaseNotes({
 
 					for (const release of releases) {
 						const body = release.body?.trim()
-						if (!body) continue
+						if (!body) {
+							continue
+						}
 						const version = extractVersionFromTag({ tag: release.tag_name })
-						if (!version) continue
+						if (!version) {
+							continue
+						}
 
 						const releaseData = { body, htmlUrl: release.html_url ?? '' }
 						const packageMatch = release.tag_name.match(/^(.+)@\d+\.\d+\.\d+/)
@@ -452,7 +492,9 @@ export async function queryReleaseNotes({
 
 					for (const candidate of repoCandidates) {
 						const metadata = packageMetadata.get(candidate.name)
-						if (!metadata) continue
+						if (!metadata) {
+							continue
+						}
 
 						const intermediateVersions = getIntermediateVersions({
 							publishedVersions: metadata.publishedVersions,
@@ -461,12 +503,14 @@ export async function queryReleaseNotes({
 							includePrerelease: candidate.currentVersion.includes('-')
 						})
 
-						const notes: VersionReleaseNote[] = []
+						const notes: Array<VersionReleaseNote> = []
 						for (const version of intermediateVersions) {
 							const release =
 								packageReleases.get(`${candidate.npmName}:${version}`) ??
 								genericReleases.get(version)
-							if (!release) continue
+							if (!release) {
+								continue
+							}
 
 							let body = release.body
 							if (body.length > RELEASE_NOTES_MAX_LENGTH) {
@@ -499,19 +543,23 @@ export function formatReleaseNotes({
 	updates,
 	releaseNotes
 }: {
-	updates: UpdateCandidate[]
-	releaseNotes: Map<string, VersionReleaseNote[]>
-}): string[] {
+	updates: Array<UpdateCandidate>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
+}): Array<string> {
 	const sorted = [...updates].toSorted((a, b) => a.name.localeCompare(b.name))
 	const notesEntries = sorted.filter((u) => releaseNotes.has(u.name))
 
-	if (notesEntries.length === 0) return []
+	if (notesEntries.length === 0) {
+		return []
+	}
 
-	const lines: string[] = ['', '## Release Notes', '']
+	const lines: Array<string> = ['', '## Release Notes', '']
 
 	for (const u of notesEntries) {
 		const versionNotes = releaseNotes.get(u.name)
-		if (!versionNotes || versionNotes.length === 0) continue
+		if (!versionNotes || versionNotes.length === 0) {
+			continue
+		}
 
 		const firstNote = versionNotes[0]
 		if (firstNote && versionNotes.length === 1) {

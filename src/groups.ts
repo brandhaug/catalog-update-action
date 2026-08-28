@@ -11,8 +11,12 @@ export function shouldIgnore({
 	rules: Config['ignore']
 }): boolean {
 	return rules.some((rule) => {
-		if (!matchesGlob({ name, pattern: rule.pattern })) return false
-		if (rule.updateTypes === null) return true
+		if (!matchesGlob({ name, pattern: rule.pattern })) {
+			return false
+		}
+		if (rule.updateTypes === null) {
+			return true
+		}
 		return rule.updateTypes.includes(changeType)
 	})
 }
@@ -21,17 +25,19 @@ export function assignToGroups({
 	candidates,
 	groups
 }: {
-	candidates: UpdateCandidate[]
+	candidates: Array<UpdateCandidate>
 	groups: Config['groups']
-}): Map<string, UpdateCandidate[]> {
-	const result = new Map<string, UpdateCandidate[]>()
+}): Map<string, Array<UpdateCandidate>> {
+	const result = new Map<string, Array<UpdateCandidate>>()
 	const assigned = new Set<string>()
 
 	for (const group of groups) {
-		const members: UpdateCandidate[] = []
+		const members: Array<UpdateCandidate> = []
 
 		for (const candidate of candidates) {
-			if (assigned.has(candidate.name)) continue
+			if (assigned.has(candidate.name)) {
+				continue
+			}
 			if (
 				!matchesAnyPattern({ name: candidate.name, patterns: group.patterns })
 			) {
@@ -60,15 +66,21 @@ export function assignToGroups({
 	const CATCH_ALL = 'all-patch-updates'
 	const catchAllConfigured = groups.some((group) => group.name === CATCH_ALL)
 	for (const [groupName, members] of result) {
-		if (groupName === CATCH_ALL) continue
+		if (groupName === CATCH_ALL) {
+			continue
+		}
 		const hasMajorOrMinor = members.some(
 			(m) =>
 				m.changeType !== 'patch' &&
 				m.changeType !== 'prerelease' &&
 				m.changeType !== 'release'
 		)
-		if (hasMajorOrMinor) continue
-		if (!catchAllConfigured) continue
+		if (hasMajorOrMinor) {
+			continue
+		}
+		if (!catchAllConfigured) {
+			continue
+		}
 
 		const patchGroup = result.get(CATCH_ALL) ?? []
 		patchGroup.push(...members)

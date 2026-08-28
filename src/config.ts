@@ -47,9 +47,17 @@ const mergeMethodSchema = z.enum(['squash', 'merge', 'rebase'])
  * keeps only the members that are valid semver change types, collapsing to
  * null when none survive.
  */
-function parseUpdateTypes({ raw }: { raw: unknown }): SemverChange[] | null {
-	if (raw === null || raw === undefined) return null
-	if (!Array.isArray(raw)) return null
+function parseUpdateTypes({
+	raw
+}: {
+	raw: unknown
+}): Array<SemverChange> | null {
+	if (raw === null || raw === undefined) {
+		return null
+	}
+	if (!Array.isArray(raw)) {
+		return null
+	}
 
 	const valid = raw.filter(
 		(item): item is SemverChange => semverChangeSchema.safeParse(item).success
@@ -73,8 +81,10 @@ const groupDefinitionSchema = z.object({
 	updateTypes: updateTypesField
 })
 
-function parseGroups({ raw }: { raw: unknown }): GroupDefinition[] {
-	if (!Array.isArray(raw)) return []
+function parseGroups({ raw }: { raw: unknown }): Array<GroupDefinition> {
+	if (!Array.isArray(raw)) {
+		return []
+	}
 
 	return raw.flatMap((item) => {
 		const parsed = groupDefinitionSchema.safeParse(item)
@@ -111,8 +121,10 @@ const ignoreRuleSchema = z.object({
 	updateTypes: updateTypesField
 })
 
-function parseIgnoreRules({ raw }: { raw: unknown }): IgnoreRule[] {
-	if (!Array.isArray(raw)) return []
+function parseIgnoreRules({ raw }: { raw: unknown }): Array<IgnoreRule> {
+	if (!Array.isArray(raw)) {
+		return []
+	}
 
 	return raw.flatMap((item) => {
 		const parsed = ignoreRuleSchema.safeParse(item)

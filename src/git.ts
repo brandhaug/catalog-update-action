@@ -24,7 +24,7 @@ export async function exec({
 	command,
 	cwd
 }: {
-	command: string[]
+	command: Array<string>
 	cwd: string
 }): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 	const proc = Bun.spawn(command, {
@@ -42,7 +42,9 @@ export async function exec({
 
 	if (exitCode !== 0) {
 		console.error(`  Command failed: ${command.join(' ')}`)
-		if (stderr.trim()) console.error(`  stderr: ${stderr.trim()}`)
+		if (stderr.trim()) {
+			console.error(`  stderr: ${stderr.trim()}`)
+		}
 	}
 
 	return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode }
@@ -59,7 +61,7 @@ const PACKAGE_MANAGERS = {
 	yarn: { install: ['yarn', 'install'], lockfile: 'yarn.lock' }
 } satisfies Record<
 	Config['packageManager'],
-	{ install: string[]; lockfile: string }
+	{ install: Array<string>; lockfile: string }
 >
 
 // ---------------------------------------------------------------------------
@@ -70,8 +72,8 @@ export function buildCatalogPrBody({
 	updates,
 	releaseNotes
 }: {
-	updates: UpdateCandidate[]
-	releaseNotes: Map<string, VersionReleaseNote[]>
+	updates: Array<UpdateCandidate>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
 }): string {
 	const sorted = [...updates].toSorted((a, b) => a.name.localeCompare(b.name))
 
@@ -86,8 +88,7 @@ export function buildCatalogPrBody({
 		)
 	]
 
-	lines.push(...formatReleaseNotes({ updates, releaseNotes }))
-	lines.push('---', PR_FOOTER)
+	lines.push(...formatReleaseNotes({ updates, releaseNotes }), '---', PR_FOOTER)
 
 	return lines.join('\n')
 }
@@ -116,11 +117,11 @@ export function buildCatalogBranchUpdate({
 	releaseNotes
 }: {
 	groupName: string
-	updates: UpdateCandidate[]
+	updates: Array<UpdateCandidate>
 	config: Config
 	titleSuffix?: string
 	branchPrefix?: string
-	releaseNotes: Map<string, VersionReleaseNote[]>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
 }): BranchUpdate {
 	const prefix = branchPrefix ?? config.branchPrefix
 	const branch = `${prefix}/${groupName}`
@@ -179,7 +180,7 @@ export async function getExistingPrs({
 }: {
 	cwd: string
 	branchPrefix: string
-}): Promise<ExistingPr[]> {
+}): Promise<Array<ExistingPr>> {
 	const { stdout } = await exec({
 		command: [
 			'gh',
@@ -199,7 +200,9 @@ export async function getExistingPrs({
 		const parsed = z
 			.array(existingPrSchema)
 			.safeParse(JSON.parse(stdout || '[]'))
-		if (!parsed.success) return []
+		if (!parsed.success) {
+			return []
+		}
 		return parsed.data.filter(
 			(pr) =>
 				pr.headRefName.startsWith(`${branchPrefix}/`) ||
@@ -224,13 +227,17 @@ export async function hasNonBotCommits({
 		cwd
 	})
 
-	if (exitCode !== 0) return true
+	if (exitCode !== 0) {
+		return true
+	}
 
 	try {
 		const parsed = prCommitsSchema.safeParse(JSON.parse(stdout))
 		// Any malformed shape or non-bot author means the PR may carry human
 		// work, so it is treated as "has non-bot commits" and left alone.
-		if (!parsed.success) return true
+		if (!parsed.success) {
+			return true
+		}
 		return parsed.data.commits.some((commit) =>
 			commit.authors.some((author) => author.login !== 'github-actions[bot]')
 		)
@@ -246,7 +253,9 @@ export async function resolveMergeableState({
 	pr: ExistingPr
 	cwd: string
 }): Promise<ExistingPr['mergeable']> {
-	if (pr.mergeable !== 'UNKNOWN') return pr.mergeable
+	if (pr.mergeable !== 'UNKNOWN') {
+		return pr.mergeable
+	}
 
 	console.log(
 		`  PR #${pr.number} has UNKNOWN mergeable state, retrying in 5s...`
@@ -258,11 +267,15 @@ export async function resolveMergeableState({
 		cwd
 	})
 
-	if (exitCode !== 0) return 'UNKNOWN'
+	if (exitCode !== 0) {
+		return 'UNKNOWN'
+	}
 
 	try {
 		const parsed = mergeableStateSchema.safeParse(JSON.parse(stdout))
-		if (!parsed.success) return 'UNKNOWN'
+		if (!parsed.success) {
+			return 'UNKNOWN'
+		}
 		return parsed.data.mergeable
 	} catch {
 		return 'UNKNOWN'
@@ -292,7 +305,9 @@ export async function isBranchBehindDefault({
 		cwd
 	})
 
-	if (exitCode !== 0) return true
+	if (exitCode !== 0) {
+		return true
+	}
 	return Number(stdout) > 0
 }
 
@@ -310,7 +325,9 @@ export async function readBranchPackageJson({
 		cwd
 	})
 
-	if (exitCode !== 0) return null
+	if (exitCode !== 0) {
+		return null
+	}
 
 	try {
 		const parsed = packageJsonSchema.safeParse(JSON.parse(stdout))
@@ -365,7 +382,9 @@ export async function updateBranch({
 		],
 		cwd
 	})
-	if (checkoutResult.exitCode !== 0) return { success: false }
+	if (checkoutResult.exitCode !== 0) {
+		return { success: false }
+	}
 
 	// Roll back to the default branch after any mid-pipeline failure so the
 	// next group isn't processed from a half-built branch state.
@@ -532,7 +551,9 @@ export async function createPr({
 	console.log(`\n  Creating PR for branch "${branchUpdate.branch}"`)
 
 	const result = await updateBranch({ branchUpdate, config, dir })
-	if (!result.success) return false
+	if (!result.success) {
+		return false
+	}
 
 	const prResult = await exec({
 		command: [
@@ -586,7 +607,7 @@ export async function syncExistingPrs({
 	config,
 	dir
 }: {
-	existingPrs: ExistingPr[]
+	existingPrs: Array<ExistingPr>
 	resolveBranchUpdate: (branchName: string) => BranchUpdate | null
 	isBranchContentOutdated: (
 		branchPackageJson: PackageJson,
@@ -675,8 +696,11 @@ export async function syncExistingPrs({
 		}
 
 		let reason = 'outdated content'
-		if (isConflicting) reason = 'conflicting'
-		else if (behindDefault) reason = `behind ${config.defaultBranch}`
+		if (isConflicting) {
+			reason = 'conflicting'
+		} else if (behindDefault) {
+			reason = `behind ${config.defaultBranch}`
+		}
 		console.log(
 			`\n  Rebuilding PR #${pr.number} (${pr.headRefName}) — ${reason}`
 		)

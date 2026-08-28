@@ -1,12 +1,22 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  // This repo is a small Bun/TypeScript CLI tool. It has no DOM, no React, no
-  // framework runtime and no web surface, so the web/frontend plugins (react,
-  // react-hooks, jsx-a11y, react-perf, vue) are absent. vitest/jest are absent
-  // too: tests run on bun:test, which has no oxlint plugin. The `node` plugin
-  // is off because the target runtime is Bun, whose node-compat layer makes
-  // several node-specific rules misreport (e.g. process/buffer usage).
-  "plugins": ["eslint", "typescript", "unicorn", "oxc", "import", "promise"],
+  // This repo is a small Bun/TypeScript CLI tool. It has no DOM, no React
+  // code, and no web surface, so the web/frontend plugins (react-hooks,
+  // jsx-a11y, react-perf, vue) are absent. The `react` plugin itself is loaded
+  // only for `react/require-render-return`; with no JSX in the repo none of
+  // its other rules fire. vitest/jest are absent too: tests run on bun:test,
+  // which has no oxlint plugin. The `node` plugin is off because the target
+  // runtime is Bun, whose node-compat layer makes several node-specific rules
+  // misreport (e.g. process/buffer usage).
+  "plugins": [
+    "eslint",
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "promise",
+    "react"
+  ],
   "jsPlugins": [
     {
       // anti-slop (upstream dmmulroy/anti-slop, vendored by ultracite — not
@@ -81,11 +91,18 @@
     "no-useless-call": "error",
     "prefer-object-has-own": "error",
     "prefer-regex-literals": "error",
-    // `multi-line` only: a brace-less body on its own line is a footgun,
-    // because oxfmt breaks a long single-line `if` at printWidth without
-    // adding braces. One-line `if (x) return y` stays legal.
-    "curly": ["error", "multi-line"],
-    "no-unexpected-multiline": "off",
+    "no-throw-literal": "error",
+    // Tripwire only: the term is `@nocommit`, not `TODO`/`FIXME`, so ordinary
+    // TODOs stay allowed.
+    "no-warning-comments": ["error", { "terms": ["@nocommit"] }],
+    // `allowNamedFunctions`: a named function expression keeps its name for a
+    // stack trace; anonymous ones must be arrows.
+    "eslint/prefer-arrow-callback": ["error", { "allowNamedFunctions": true }],
+    // Braces required on every block body, including one-liners: oxfmt breaks
+    // a long single-line `if` at printWidth without adding braces, so an
+    // unbraced body is always a footgun.
+    "curly": "error",
+    "no-unexpected-multiline": "error",
     "no-else-return": ["error", { "allowElseIf": false }],
     "no-lonely-if": "error",
     "no-nested-ternary": "error",
@@ -93,7 +110,16 @@
     "prefer-destructuring": ["error", { "array": false }],
     "prefer-template": "error",
     "default-param-last": "error",
-    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "no-unused-vars": [
+      "error",
+      {
+        "argsIgnorePattern": "^_",
+        // oxlint's form of the requested `variables: "off"`: fix-mode only.
+        // Everything is still reported; unused imports are the only findings
+        // emitted as safe auto-fixes, unused-variable fixes are disabled.
+        "fix": { "imports": "safe-fix", "variables": "off" }
+      }
+    ],
     // no-console is intentionally absent: this is a CLI tool whose job is to
     // print progress to stdout. There is no UI layer to keep free of it.
     "no-array-constructor": "error",
@@ -135,6 +161,9 @@
     "typescript/triple-slash-reference": "error",
     "typescript/adjacent-overload-signatures": "error",
     "typescript/ban-tslint-comment": "error",
+    // `Array<T>` over `T[]` (and `ReadonlyArray<T>` over `readonly T[]`): one
+    // uniform style, no bracket-ambiguity with index signatures.
+    "typescript/array-type": ["error", { "default": "generic" }],
     "typescript/consistent-generic-constructors": "error",
     "typescript/consistent-indexed-object-style": ["error", "record"],
     // The repo expresses every object shape as a `type` alias (there is no
@@ -191,12 +220,17 @@
 
     // --- Unicorn ---------------------------------------------------------
     "unicorn/catch-error-name": "error",
+    // `catch {}` when the binding is unused; no dead identifiers.
+    "unicorn/prefer-optional-catch-binding": "error",
     "unicorn/consistent-existence-index-check": "error",
     "unicorn/filename-case": "error",
     "unicorn/new-for-builtins": "error",
     "unicorn/no-abusive-eslint-disable": "error",
     "unicorn/no-await-in-promise-methods": "error",
     "unicorn/no-empty-file": "error",
+    // `\x41` vs `\u0041`: in strings the two are too easy to confuse, so hex
+    // escapes are rejected outright.
+    "unicorn/no-hex-escape": "error",
     // strict, not the default loose strategy: loose skips `Error` itself. The
     // one `instanceof Error` probe (registry.ts's error normalizer) is exempted
     // per file below because it is the boundary that narrows an unknown
@@ -221,7 +255,9 @@
     "unicorn/numeric-separators-style": "error",
     "unicorn/prefer-array-find": "error",
     "unicorn/prefer-array-flat-map": "error",
+    "unicorn/prefer-array-index-of": "error",
     "unicorn/prefer-array-some": "error",
+    "unicorn/prefer-at": "error",
     "unicorn/prefer-date-now": "error",
     "unicorn/prefer-logical-operator-over-ternary": "error",
     "unicorn/prefer-native-coercion-functions": "error",
@@ -233,6 +269,9 @@
     "unicorn/prefer-spread": "error",
     "unicorn/prefer-string-replace-all": "error",
     "unicorn/prefer-string-slice": "error",
+    "unicorn/prefer-string-raw": "error",
+    "unicorn/prefer-single-call": "error",
+    "unicorn/prefer-import-meta-properties": "error",
     "unicorn/require-array-join-separator": "error",
     "unicorn/switch-case-braces": "error",
     "unicorn/text-encoding-identifier-case": "error",
@@ -290,6 +329,7 @@
     // Matches the `inline-type-imports` fixStyle on consistent-type-imports, so
     // both halves of the type-import style are enforced.
     "import/consistent-type-specifier-style": ["error", "prefer-inline"],
+    "import/export": "error",
     "import/no-absolute-path": "error",
     "import/no-cycle": "error",
     "import/no-duplicates": "error",
@@ -332,7 +372,13 @@
     "anti-slop/no-unknown-type-aliases": "error",
     "anti-slop/no-unsafe-dictionary-type": "error",
     "anti-slop/no-widen-then-assert": "error",
-    "anti-slop/require-safety-comment-for-type-assertion": "error"
+    "anti-slop/require-safety-comment-for-type-assertion": "error",
+
+    // --- react --------------------------------------------------------------
+    // Loaded solely for this rule (see the `plugins` note at the top): the
+    // repo has no JSX, so this only guards a future class component against a
+    // render method without a return.
+    "react/require-render-return": "error"
   },
   "overrides": [
     {

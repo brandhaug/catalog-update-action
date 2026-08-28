@@ -17,7 +17,7 @@ export function matchesGlob({
 	let regex = globCache.get(pattern)
 	if (!regex) {
 		const escaped = pattern
-			.replaceAll(/[.+^${}()|[\]\\]/g, '\\$&')
+			.replaceAll(/[.+^${}()|[\]\\]/g, String.raw`\$&`)
 			.replaceAll('*', '.*')
 		regex = new RegExp(`^${escaped}$`)
 		globCache.set(pattern, regex)
@@ -30,7 +30,7 @@ export function matchesAnyPattern({
 	patterns
 }: {
 	name: string
-	patterns: string[]
+	patterns: Array<string>
 }): boolean {
 	return patterns.some((pattern) => matchesGlob({ name, pattern }))
 }
@@ -48,7 +48,9 @@ export function parseSemver({ version }: { version: string }): {
 	const match = version.match(
 		/^(\d+)\.(\d+)\.(\d+)(?:-([\w.]+))?(?:\+[\w.]+)?$/
 	)
-	if (!match) return null
+	if (!match) {
+		return null
+	}
 	return {
 		major: Number(match[1]),
 		minor: Number(match[2]),
@@ -61,18 +63,30 @@ export function parseSemver({ version }: { version: string }): {
 function comparePrereleaseIdentifier(a: string, b: string): number {
 	const numA = /^\d+$/.test(a) ? Number(a) : null
 	const numB = /^\d+$/.test(b) ? Number(b) : null
-	if (numA !== null && numB !== null) return numA - numB
-	if (numA !== null) return -1 // numeric < string
-	if (numB !== null) return 1 // string > numeric
+	if (numA !== null && numB !== null) {
+		return numA - numB
+	}
+	if (numA !== null) {
+		return -1
+	} // numeric < string
+	if (numB !== null) {
+		return 1
+	} // string > numeric
 	return a.localeCompare(b)
 }
 
 /** Compare prerelease identifiers per semver 2.0.0 spec: release > prerelease, numeric < string, left-to-right. */
 function comparePrerelease(a?: string, b?: string): number {
-	if (a === b) return 0
+	if (a === b) {
+		return 0
+	}
 	// release (no prerelease) > prerelease
-	if (!a) return 1
-	if (!b) return -1
+	if (!a) {
+		return 1
+	}
+	if (!b) {
+		return -1
+	}
 
 	const partsA = a.split('.')
 	const partsB = b.split('.')
@@ -82,11 +96,17 @@ function comparePrerelease(a?: string, b?: string): number {
 		const pa = partsA[i]
 		const pb = partsB[i]
 		// Fewer identifiers < more identifiers when all preceding are equal
-		if (pa === undefined) return -1
-		if (pb === undefined) return 1
+		if (pa === undefined) {
+			return -1
+		}
+		if (pb === undefined) {
+			return 1
+		}
 
 		const cmp = comparePrereleaseIdentifier(pa, pb)
-		if (cmp !== 0) return cmp
+		if (cmp !== 0) {
+			return cmp
+		}
 	}
 
 	return 0
@@ -101,31 +121,53 @@ export function classifySemverChange({
 }): SemverChange | null {
 	const a = parseSemver({ version: from })
 	const b = parseSemver({ version: to })
-	if (!a || !b) return null
-	if (b.major > a.major) return 'major'
-	if (b.major < a.major) return null
-	if (b.minor > a.minor) return 'minor'
-	if (b.minor < a.minor) return null
+	if (!a || !b) {
+		return null
+	}
+	if (b.major > a.major) {
+		return 'major'
+	}
+	if (b.major < a.major) {
+		return null
+	}
+	if (b.minor > a.minor) {
+		return 'minor'
+	}
+	if (b.minor < a.minor) {
+		return null
+	}
 	if (b.patch > a.patch) {
 		if (a.prerelease) {
 			return b.prerelease ? 'prerelease' : 'release'
 		}
 		return 'patch'
 	}
-	if (b.patch < a.patch) return null
+	if (b.patch < a.patch) {
+		return null
+	}
 	// Same major.minor.patch — compare prerelease
 	const cmp = comparePrerelease(a.prerelease, b.prerelease)
-	if (cmp < 0) return a.prerelease && !b.prerelease ? 'release' : 'prerelease'
+	if (cmp < 0) {
+		return a.prerelease && !b.prerelease ? 'release' : 'prerelease'
+	}
 	return null
 }
 
 export function compareSemver({ a, b }: { a: string; b: string }): number {
 	const pa = parseSemver({ version: a })
 	const pb = parseSemver({ version: b })
-	if (!pa || !pb) return 0
-	if (pa.major !== pb.major) return pa.major - pb.major
-	if (pa.minor !== pb.minor) return pa.minor - pb.minor
-	if (pa.patch !== pb.patch) return pa.patch - pb.patch
+	if (!pa || !pb) {
+		return 0
+	}
+	if (pa.major !== pb.major) {
+		return pa.major - pb.major
+	}
+	if (pa.minor !== pb.minor) {
+		return pa.minor - pb.minor
+	}
+	if (pa.patch !== pb.patch) {
+		return pa.patch - pb.patch
+	}
 	return comparePrerelease(pa.prerelease, pb.prerelease)
 }
 
@@ -137,9 +179,13 @@ function compareSemverDescending(a: string, b: string): number {
 /** Parse version from GitHub release tag formats: v1.2.3, 1.2.3, name@1.2.3, @scope/name@1.2.3 */
 export function extractVersionFromTag({ tag }: { tag: string }): string | null {
 	const atMatch = tag.match(/@(\d+\.\d+\.\d+.*)$/)
-	if (atMatch?.[1]) return atMatch[1]
+	if (atMatch?.[1]) {
+		return atMatch[1]
+	}
 	const vMatch = tag.match(/^v?(\d+\.\d+\.\d+.*)$/)
-	if (vMatch?.[1]) return vMatch[1]
+	if (vMatch?.[1]) {
+		return vMatch[1]
+	}
 	return null
 }
 
@@ -157,15 +203,19 @@ export function getIntermediateVersions({
 	latestVersion,
 	includePrerelease = false
 }: {
-	publishedVersions: string[]
+	publishedVersions: Array<string>
 	currentVersion: string
 	latestVersion: string
 	includePrerelease?: boolean
-}): string[] {
+}): Array<string> {
 	const intermediate = publishedVersions
 		.filter((v) => {
-			if (!includePrerelease && v.includes('-')) return false
-			if (!parseSemver({ version: v })) return false
+			if (!includePrerelease && v.includes('-')) {
+				return false
+			}
+			if (!parseSemver({ version: v })) {
+				return false
+			}
 			return (
 				compareSemver({ a: currentVersion, b: v }) < 0 &&
 				compareSemver({ a: v, b: latestVersion }) <= 0
@@ -174,7 +224,9 @@ export function getIntermediateVersions({
 		.toSorted(compareSemverDescending)
 		.slice(0, INTERMEDIATE_VERSIONS_CAP)
 
-	if (intermediate.length === 0) return [latestVersion]
+	if (intermediate.length === 0) {
+		return [latestVersion]
+	}
 	return intermediate
 }
 
@@ -219,6 +271,8 @@ export class Semaphore {
 	release(): void {
 		this.running--
 		const next = this.queue.shift()
-		if (next) next()
+		if (next) {
+			next()
+		}
 	}
 }

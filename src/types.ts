@@ -18,17 +18,17 @@ export type AuditAdvisory = {
 	title: string
 	severity: Severity
 	vulnerable_versions: string
-	cwe: string[]
+	cwe: Array<string>
 	cvss: { score: number; vectorString: string }
 }
 
-export type AuditResult = Record<string, AuditAdvisory[]>
+export type AuditResult = Record<string, Array<AuditAdvisory>>
 
 export type OverrideEntry = {
 	packageName: string
 	vulnerableRange: string
 	fixedVersion: string
-	advisories: AuditAdvisory[]
+	advisories: Array<AuditAdvisory>
 	/** True when an override already exists in package.json but bun audit still reports the vulnerability (stale lockfile). */
 	existingOverrideStale?: boolean
 }
@@ -94,13 +94,13 @@ export type UpdateCandidate = CatalogEntry & {
 
 export type GroupDefinition = {
 	name: string
-	patterns: string[]
-	updateTypes: SemverChange[] | null
+	patterns: Array<string>
+	updateTypes: Array<SemverChange> | null
 }
 
 export type IgnoreRule = {
 	pattern: string
-	updateTypes: SemverChange[] | null
+	updateTypes: Array<SemverChange> | null
 }
 
 export type ExistingPr = {
@@ -117,7 +117,7 @@ export type GitHubRepo = {
 
 export type PackageMetadata = {
 	repo: GitHubRepo | null
-	publishedVersions: string[]
+	publishedVersions: Array<string>
 	/** Mapping of version → ISO 8601 publish timestamp from npm registry */
 	publishTimes: Record<string, string>
 }
@@ -145,8 +145,8 @@ export type Config = {
 	concurrency: number
 	packageManager: 'bun' | 'npm' | 'pnpm' | 'yarn'
 	minReleaseAgeDays: number
-	groups: GroupDefinition[]
-	ignore: IgnoreRule[]
+	groups: Array<GroupDefinition>
+	ignore: Array<IgnoreRule>
 	audit: AuditConfig
 	autoMerge: AutoMergeConfig
 }

@@ -73,7 +73,7 @@ Examples:
   - uses: brandhaug/catalog-update-action@v1
 `.trim()
 
-function takeValue(args: string[], index: number, option: string): string {
+function takeValue(args: Array<string>, index: number, option: string): string {
 	const value = args[index + 1]
 	if (value === undefined) {
 		console.error(`Missing value for ${option}`)
@@ -90,7 +90,9 @@ function parseArgs() {
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i]
-		if (arg === undefined) break
+		if (arg === undefined) {
+			break
+		}
 
 		switch (arg) {
 			case '--help':
@@ -198,26 +200,30 @@ async function findCatalogCandidates({
 	entries,
 	config
 }: {
-	entries: CatalogEntry[]
+	entries: Array<CatalogEntry>
 	config: Config
-}): Promise<UpdateCandidate[]> {
+}): Promise<Array<UpdateCandidate>> {
 	console.log('  Querying npm registry...')
 	const semaphore = new Semaphore(config.concurrency)
 	const latestVersions = await queryNpmRegistry({ entries, semaphore })
 	console.log(`    Got latest versions for ${latestVersions.size} packages`)
 
 	console.log('  Finding available updates...')
-	const candidates: UpdateCandidate[] = []
+	const candidates: Array<UpdateCandidate> = []
 
 	for (const entry of entries) {
 		const latest = latestVersions.get(entry.name)
-		if (!latest) continue
+		if (!latest) {
+			continue
+		}
 
 		const changeType = classifySemverChange({
 			from: entry.currentVersion,
 			to: latest
 		})
-		if (changeType === null) continue
+		if (changeType === null) {
+			continue
+		}
 
 		if (shouldIgnore({ name: entry.name, changeType, rules: config.ignore })) {
 			continue
@@ -234,16 +240,18 @@ async function buildGroupedUpdates({
 	candidates,
 	config
 }: {
-	candidates: UpdateCandidate[]
+	candidates: Array<UpdateCandidate>
 	config: Config
 }): Promise<{
-	candidates: UpdateCandidate[]
-	groups: Map<string, UpdateCandidate[]>
-	releaseNotes: Map<string, VersionReleaseNote[]>
+	candidates: Array<UpdateCandidate>
+	groups: Map<string, Array<UpdateCandidate>>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
 }> {
-	const groups = new Map<string, UpdateCandidate[]>()
-	const releaseNotes = new Map<string, VersionReleaseNote[]>()
-	if (candidates.length === 0) return { candidates, groups, releaseNotes }
+	const groups = new Map<string, Array<UpdateCandidate>>()
+	const releaseNotes = new Map<string, Array<VersionReleaseNote>>()
+	if (candidates.length === 0) {
+		return { candidates, groups, releaseNotes }
+	}
 
 	console.log('  Fetching package metadata...')
 	const semaphore = new Semaphore(config.concurrency)
@@ -315,13 +323,13 @@ async function findOverrideUpdates({
 }: {
 	dir: DirectoryContext
 	config: Config
-	entries: CatalogEntry[]
+	entries: Array<CatalogEntry>
 	packageJson: PackageJson
 	effectiveBranchPrefix: string
 	titleSuffix: string
 }): Promise<{
 	overrideBranchUpdate: BranchUpdate | null
-	overrideEntries: OverrideEntry[]
+	overrideEntries: Array<OverrideEntry>
 }> {
 	if (!config.audit.enabled) {
 		return { overrideBranchUpdate: null, overrideEntries: [] }
@@ -353,8 +361,10 @@ async function findOverrideUpdates({
 		(e) => e.existingOverrideStale
 	).length
 	const newCount = overrideEntries.length - staleCount
-	const parts: string[] = []
-	if (newCount > 0) parts.push(`${newCount} new`)
+	const parts: Array<string> = []
+	if (newCount > 0) {
+		parts.push(`${newCount} new`)
+	}
 	if (staleCount > 0) {
 		parts.push(`${staleCount} stale (lockfile not re-resolved)`)
 	}
@@ -392,14 +402,14 @@ async function syncDirectoryPrs({
 }: {
 	dir: DirectoryContext
 	config: Config
-	groups: Map<string, UpdateCandidate[]>
-	releaseNotes: Map<string, VersionReleaseNote[]>
+	groups: Map<string, Array<UpdateCandidate>>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
 	titleSuffix: string
 	effectiveBranchPrefix: string
 	overrideBranchUpdate: BranchUpdate | null
-	overrideEntries: OverrideEntry[]
+	overrideEntries: Array<OverrideEntry>
 }): Promise<{
-	existingPrs: ExistingPr[]
+	existingPrs: Array<ExistingPr>
 	closedCount: number
 	rebuiltCount: number
 }> {
@@ -430,7 +440,9 @@ async function syncDirectoryPrs({
 				branchPrefix: effectiveBranchPrefix
 			})
 			const updates = groups.get(groupName)
-			if (!updates || updates.length === 0) return null
+			if (!updates || updates.length === 0) {
+				return null
+			}
 			return buildCatalogBranchUpdate({
 				groupName,
 				updates,
@@ -446,12 +458,18 @@ async function syncDirectoryPrs({
 				branchPrefix: effectiveBranchPrefix
 			})
 			const updates = groups.get(groupName)
-			if (!updates) return true
+			if (!updates) {
+				return true
+			}
 			const branchCatalog = readStringRecord(branchPkg.catalog)
-			if (!branchCatalog) return true
+			if (!branchCatalog) {
+				return true
+			}
 			for (const update of updates) {
 				const expected = buildCatalogValue({ update })
-				if (branchCatalog[update.name] !== expected) return true
+				if (branchCatalog[update.name] !== expected) {
+					return true
+				}
 			}
 			return false
 		},
@@ -498,10 +516,10 @@ async function createDirectoryPrs({
 }: {
 	dir: DirectoryContext
 	config: Config
-	existingPrs: ExistingPr[]
+	existingPrs: Array<ExistingPr>
 	closedCount: number
-	groups: Map<string, UpdateCandidate[]>
-	releaseNotes: Map<string, VersionReleaseNote[]>
+	groups: Map<string, Array<UpdateCandidate>>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
 	titleSuffix: string
 	effectiveBranchPrefix: string
 	overrideBranchUpdate: BranchUpdate | null
@@ -552,7 +570,9 @@ async function createDirectoryPrs({
 		}
 
 		const branch = `${effectiveBranchPrefix}/${groupName}`
-		if (existingBranches.has(branch)) continue
+		if (existingBranches.has(branch)) {
+			continue
+		}
 
 		const branchUpdate = buildCatalogBranchUpdate({
 			groupName,
@@ -640,9 +660,13 @@ async function processDirectory({
 	}
 
 	if (dryRun) {
-		const parts: string[] = []
-		if (groups.size > 0) parts.push(`${groups.size} catalog PRs`)
-		if (overrideBranchUpdate) parts.push('1 override PR')
+		const parts: Array<string> = []
+		if (groups.size > 0) {
+			parts.push(`${groups.size} catalog PRs`)
+		}
+		if (overrideBranchUpdate) {
+			parts.push('1 override PR')
+		}
 		console.log(`  [DRY RUN] Would create ${parts.join(' and ')}`)
 		return { created: 0, failed: 0, rebuilt: 0 }
 	}

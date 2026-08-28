@@ -3,8 +3,12 @@ import { parseSemver } from './utils'
 
 /** Detect the range prefix (`^`, `~`) or empty string for a pinned version. */
 function detectRangePrefix(raw: string): '^' | '~' | '' {
-	if (raw.startsWith('^')) return '^'
-	if (raw.startsWith('~')) return '~'
+	if (raw.startsWith('^')) {
+		return '^'
+	}
+	if (raw.startsWith('~')) {
+		return '~'
+	}
 	return ''
 }
 
@@ -13,8 +17,8 @@ export function parseCatalog({
 	catalog
 }: {
 	catalog: Record<string, string>
-}): CatalogEntry[] {
-	const entries: CatalogEntry[] = []
+}): Array<CatalogEntry> {
+	const entries: Array<CatalogEntry> = []
 
 	for (const [name, raw] of Object.entries(catalog)) {
 		// Handle npm: aliases (e.g., "npm:rolldown-vite@7.3.1" or "npm:rolldown-vite@^7.3.1")
@@ -24,7 +28,9 @@ export function parseCatalog({
 		if (aliasNpmName && aliasVersion) {
 			const aliasPrefix = detectRangePrefix(aliasVersion)
 			const cleanVersion = aliasPrefix ? aliasVersion.slice(1) : aliasVersion
-			if (!parseSemver({ version: cleanVersion })) continue
+			if (!parseSemver({ version: cleanVersion })) {
+				continue
+			}
 
 			entries.push({
 				name,
@@ -40,7 +46,9 @@ export function parseCatalog({
 		const rangePrefix = detectRangePrefix(raw)
 		const version = rangePrefix ? raw.slice(1) : raw
 
-		if (!parseSemver({ version })) continue
+		if (!parseSemver({ version })) {
+			continue
+		}
 
 		entries.push({
 			name,

@@ -202,7 +202,7 @@ describe('computeOverrides', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildOverridePrBody', () => {
-  const overrides: OverrideEntry[] = [
+  const overrides: Array<OverrideEntry> = [
     {
       packageName: 'lodash',
       vulnerableRange: '<4.17.21',
@@ -240,7 +240,7 @@ describe('buildOverridePrBody', () => {
 
 describe('buildOverrideBranchUpdate', () => {
   test('builds correct branch name', () => {
-    const overrides: OverrideEntry[] = [{
+    const overrides: Array<OverrideEntry> = [{
       packageName: 'lodash',
       vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
@@ -256,7 +256,7 @@ describe('buildOverrideBranchUpdate', () => {
   })
 
   test('singular title for one dependency', () => {
-    const overrides: OverrideEntry[] = [{
+    const overrides: Array<OverrideEntry> = [{
       packageName: 'lodash',
       vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
@@ -272,7 +272,7 @@ describe('buildOverrideBranchUpdate', () => {
   })
 
   test('plural title for multiple dependencies', () => {
-    const overrides: OverrideEntry[] = [
+    const overrides: Array<OverrideEntry> = [
       { packageName: 'lodash', vulnerableRange: '<4.17.21', fixedVersion: '4.17.21', advisories: [makeAdvisory()] },
       { packageName: 'minimist', vulnerableRange: '<1.2.6', fixedVersion: '1.2.6', advisories: [makeAdvisory()] }
     ]
@@ -286,7 +286,7 @@ describe('buildOverrideBranchUpdate', () => {
   })
 
   test('appends titleSuffix for working directory', () => {
-    const overrides: OverrideEntry[] = [{
+    const overrides: Array<OverrideEntry> = [{
       packageName: 'lodash',
       vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
@@ -304,7 +304,7 @@ describe('buildOverrideBranchUpdate', () => {
   })
 
   test('applyChanges removes stale tool overrides and preserves user overrides', () => {
-    const overrides: OverrideEntry[] = [{
+    const overrides: Array<OverrideEntry> = [{
       packageName: 'lodash',
       vulnerableRange: '<4.17.21',
       fixedVersion: '4.17.21',
@@ -348,7 +348,7 @@ const pkg = {
 // ---------------------------------------------------------------------------
 
 describe('isOverrideBranchOutdated', () => {
-  const expectedOverrides: OverrideEntry[] = [
+  const expectedOverrides: Array<OverrideEntry> = [
     {
       packageName: 'lodash',
       vulnerableRange: '<4.17.21',

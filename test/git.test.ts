@@ -102,7 +102,7 @@ describe('buildCatalogPrBody', () => {
     const updates = [
       makeCandidate({ name: 'react', currentVersion: '18.0.0', latestVersion: '19.0.0' })
     ]
-    const releaseNotes = new Map<string, VersionReleaseNote[]>([
+    const releaseNotes = new Map<string, Array<VersionReleaseNote>>([
       ['react', [{ version: '19.0.0', body: 'React 19 is here!' }]]
     ])
 
