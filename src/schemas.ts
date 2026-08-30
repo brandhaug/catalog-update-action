@@ -1,13 +1,7 @@
 import { z } from 'zod'
 
 /** Severity levels shared by the audit pipeline and the config boundary. */
-export const SEVERITIES = [
-	'info',
-	'low',
-	'moderate',
-	'high',
-	'critical'
-] as const
+const SEVERITIES = ['info', 'low', 'moderate', 'high', 'critical'] as const
 export const severitySchema = z.enum(SEVERITIES)
 export type Severity = z.infer<typeof severitySchema>
 
@@ -36,7 +30,7 @@ export const packageJsonSchema = z.record(z.string(), jsonValueSchema)
 export type PackageJson = z.infer<typeof packageJsonSchema>
 
 /** An object whose values are all strings (catalog entries, override maps). */
-export const stringRecordSchema = z.record(z.string(), z.string())
+const stringRecordSchema = z.record(z.string(), z.string())
 
 /**
  * Read a package.json field as a flat string map (catalog entries, override

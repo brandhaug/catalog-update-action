@@ -233,7 +233,7 @@ export async function getExistingPrs({
 	}
 }
 
-export async function hasNonBotCommits({
+async function hasNonBotCommits({
 	pr,
 	cwd
 }: {
@@ -256,7 +256,7 @@ export async function hasNonBotCommits({
 	}
 }
 
-export async function resolveMergeableState({
+async function resolveMergeableState({
 	pr,
 	cwd
 }: {
@@ -296,7 +296,7 @@ export async function resolveMergeableState({
 // Branch operations
 // ---------------------------------------------------------------------------
 
-export async function isBranchBehindDefault({
+async function isBranchBehindDefault({
 	branch,
 	defaultBranch,
 	cwd
@@ -321,7 +321,7 @@ export async function isBranchBehindDefault({
 	return Number(stdout) > 0
 }
 
-export async function readBranchPackageJson({
+async function readBranchPackageJson({
 	branch,
 	cwd,
 	packageJsonRelPath
@@ -370,7 +370,7 @@ async function returnToDefault({
 // Generic branch update + PR creation
 // ---------------------------------------------------------------------------
 
-export async function updateBranch({
+async function updateBranch({
 	branchUpdate,
 	config,
 	dir
@@ -501,7 +501,7 @@ export async function updateBranch({
  * such checks there is nothing to wait for, so GitHub refuses to arm it. A
  * failure here is never fatal, because the PR is already open.
  */
-export async function enableAutoMerge({
+async function enableAutoMerge({
 	prRef,
 	config,
 	dir
