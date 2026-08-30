@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.12.2](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.12.1...catalog-update-action-v0.12.2) (2026-08-30)
+
+
+### Bug Fixes
+
+* ignore merge commits when detecting human commits in update PRs ([#25](https://github.com/brandhaug/catalog-update-action/issues/25)) ([df587c6](https://github.com/brandhaug/catalog-update-action/commit/df587c6da6c92f5a35155f9f32b48ec6bebe80fe))
+
+
+### Miscellaneous
+
+* **deps:** bump oxlint from 1.79.0 to 1.80.0 ([#20](https://github.com/brandhaug/catalog-update-action/issues/20)) ([9cceccb](https://github.com/brandhaug/catalog-update-action/commit/9cceccb95db95a7ee0ff3592454ee8c1e5122859))
+* enable strict oxlint rules and fix violations ([#22](https://github.com/brandhaug/catalog-update-action/issues/22)) ([2165334](https://github.com/brandhaug/catalog-update-action/commit/2165334592265dce6c2ec634e2e5ece4d90b8e9a))
+* remove dead code and unused dependencies surfaced by fallow ([#27](https://github.com/brandhaug/catalog-update-action/issues/27)) ([737d02d](https://github.com/brandhaug/catalog-update-action/commit/737d02db49cdc781d78f774eb2b6af3e022c9be3))
+
 ## [0.12.1](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.12.0...catalog-update-action-v0.12.1) (2026-08-27)
 
 
