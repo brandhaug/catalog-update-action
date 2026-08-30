@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildCatalogValue, buildCatalogPrBody, buildCatalogBranchUpdate } from '../src/git'
+import { buildCatalogValue, buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits } from '../src/git'
 import { type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
@@ -235,5 +235,47 @@ describe('buildCatalogBranchUpdate', () => {
 
     expect(result.branch).toBe('catalog-update/react')
     expect(result.title).toBe('chore(deps): bump react from 18.0.0 to 19.0.0')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// hasHumanContentCommits
+// ---------------------------------------------------------------------------
+
+describe('hasHumanContentCommits', () => {
+  const bot = { author: { login: 'github-actions[bot]' }, parents: [{ sha: 'a' }] }
+
+  test('returns false for bot-authored commits', () => {
+    expect(hasHumanContentCommits({ raw: [bot] })).toBe(false)
+  })
+
+  test('returns true for human-authored non-merge commit', () => {
+    expect(
+      hasHumanContentCommits({ raw: [bot, { author: { login: 'brandhaug' }, parents: [{ sha: 'a' }] }] })
+    ).toBe(true)
+  })
+
+  test('ignores human-authored merge commits (e.g. "Update branch")', () => {
+    expect(
+      hasHumanContentCommits({
+      raw: [
+        bot,
+        { author: { login: 'brandhaug' }, parents: [{ sha: 'a' }, { sha: 'b' }] }
+      ]
+    })
+    ).toBe(false)
+  })
+
+  test('returns true when author is null (deleted account)', () => {
+    expect(hasHumanContentCommits({ raw: [{ author: null, parents: [] }] })).toBe(true)
+  })
+
+  test('returns true for malformed payload', () => {
+    expect(hasHumanContentCommits({ raw: { unexpected: true } })).toBe(true)
+    expect(hasHumanContentCommits({ raw: 'not json data' })).toBe(true)
+  })
+
+  test('returns false for empty commit list', () => {
+    expect(hasHumanContentCommits({ raw: [] })).toBe(false)
   })
 })

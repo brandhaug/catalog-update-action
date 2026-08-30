@@ -32,7 +32,19 @@ name: Catalog Updates
 on:
   schedule:
     - cron: '0 6 * * 1-5'  # Weekdays at 06:00 UTC
+  push:
+    branches:
+      - master
+    paths:
+      - '**/package.json'
+      - '**/bun.lock'
   workflow_dispatch:
+
+# Rebuilds of open update PRs must run one at a time; queued (not cancelled)
+# runs are what let the cascade converge after each merge.
+concurrency:
+  group: catalog-update
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -47,6 +59,8 @@ jobs:
           fetch-depth: 0
       - uses: brandhaug/catalog-update-action@v1
 ```
+
+> **Tip:** The `push` trigger makes the action rebuild open PRs immediately after every merge to the default branch. With auto-merge enabled this cascades — each merge rebuilds the remaining PRs, their CI runs, they merge, and the process repeats until all groups are up to date — instead of waiting for the next scheduled run.
 
 > **Tip:** PRs created with the default `GITHUB_TOKEN` won't trigger downstream workflows (e.g. CI checks). Use a [GitHub App token](https://github.com/actions/create-github-app-token) instead:
 >
@@ -199,7 +213,7 @@ Turns on [GitHub auto-merge](https://docs.github.com/en/pull-requests/collaborat
 
 Two repository settings are required: **Allow auto-merge** under Settings > General > Pull Requests, and **required status checks** on the base branch (via ruleset or branch protection), which auto-merge waits for. The token needs `pull-requests: write` and `contents: write`.
 
-**Safety:** auto-merge lands dependency changes with no human read. Pair it with `minReleaseAgeDays` (the action warns if `autoMerge` is on and the age is `0`), and note that PRs carrying non-bot commits are skipped.
+**Safety:** auto-merge lands dependency changes with no human read. Pair it with `minReleaseAgeDays` (the action warns if `autoMerge` is on and the age is `0`), and note that PRs carrying human-authored content commits are skipped (merge commits, such as GitHub's "Update branch", are ignored).
 
 ## How It Works
 

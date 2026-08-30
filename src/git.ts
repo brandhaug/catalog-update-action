@@ -163,14 +163,32 @@ const existingPrSchema = z.object({
 	title: z.string()
 })
 
-/** Shape of `gh pr view --json commits` output. */
-const prCommitsSchema = z.object({
-	commits: z.array(
-		z.object({
-			authors: z.array(z.object({ login: z.string() }))
-		})
+/** Shape of `gh api repos/{owner}/{repo}/pulls/N/commits` output. */
+const prApiCommitsSchema = z.array(
+	z.object({
+		author: z.object({ login: z.string().nullable() }).nullable().default(null),
+		parents: z.array(z.unknown()).default([])
+	})
+)
+
+/**
+ * Whether the PR carries human-authored content commits. Merge commits
+ * (e.g. GitHub's "Update branch") never contain content changes, so they are
+ * ignored regardless of author.
+ */
+export function hasHumanContentCommits({ raw }: { raw: unknown }): boolean {
+	const parsed = prApiCommitsSchema.safeParse(raw)
+	// Any malformed shape or non-bot author means the PR may carry human
+	// work, so it is treated as "has human content commits" and left alone.
+	if (!parsed.success) {
+		return true
+	}
+	return parsed.data.some(
+		(commit) =>
+			commit.parents.length < 2 &&
+			commit.author?.login !== 'github-actions[bot]'
 	)
-})
+}
 
 const mergeableStateSchema = z.object({ mergeable: mergeableSchema })
 
@@ -223,7 +241,7 @@ export async function hasNonBotCommits({
 	cwd: string
 }): Promise<boolean> {
 	const { stdout, exitCode } = await exec({
-		command: ['gh', 'pr', 'view', String(pr.number), '--json', 'commits'],
+		command: ['gh', 'api', `repos/{owner}/{repo}/pulls/${pr.number}/commits`],
 		cwd
 	})
 
@@ -232,15 +250,7 @@ export async function hasNonBotCommits({
 	}
 
 	try {
-		const parsed = prCommitsSchema.safeParse(JSON.parse(stdout))
-		// Any malformed shape or non-bot author means the PR may carry human
-		// work, so it is treated as "has non-bot commits" and left alone.
-		if (!parsed.success) {
-			return true
-		}
-		return parsed.data.commits.some((commit) =>
-			commit.authors.some((author) => author.login !== 'github-actions[bot]')
-		)
+		return hasHumanContentCommits(JSON.parse(stdout))
 	} catch {
 		return true
 	}
@@ -639,7 +649,9 @@ export async function syncExistingPrs({
 	/* oxlint-disable no-await-in-loop */
 	for (const pr of existingPrs) {
 		if (nonBotResults.get(pr.number)) {
-			console.log(`  Skipping PR #${pr.number} — has non-bot commits`)
+			console.log(
+				`  Skipping PR #${pr.number} — has human-authored content commits`
+			)
 			continue
 		}
 
