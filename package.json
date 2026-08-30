@@ -36,6 +36,7 @@
     "lint": "bunx oxlint --type-aware src/ test/",
     "fmt": "bunx oxfmt src/",
     "fmt:check": "bunx oxfmt --check src/",
+    "dead-code": "fallow dead-code --fail-on-regression",
     "prepare": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
