@@ -1,13 +1,9 @@
 import { z } from 'zod'
-import {
-	readStringRecord,
-	packageJsonSchema,
-	severitySchema,
-	type PackageJson
-} from '../schemas'
+import { severitySchema } from '../schemas'
 import { parseSemver } from '../utils'
 import { type AuditResult } from '../types'
 import { type AuditCapability, type CatalogProvider } from './types'
+import { readJsonStringMap, writeJsonStringMap } from './json'
 import { applyYamlCatalogUpdates, parseYamlCatalogs } from './yaml'
 
 // ---------------------------------------------------------------------------
@@ -30,7 +26,7 @@ const yarnAuditLineSchema = z.object({
 	})
 })
 
-export function parseYarnAuditOutput({
+function parseYarnAuditOutput({
 	output
 }: {
 	output: string
@@ -81,39 +77,7 @@ export function parseYarnAuditOutput({
 // Overrides
 // ---------------------------------------------------------------------------
 
-function readResolutions({
-	content
-}: {
-	content: string
-}): Record<string, string> | undefined {
-	try {
-		const parsed = packageJsonSchema.safeParse(JSON.parse(content))
-		if (!parsed.success) {
-			return undefined
-		}
-		return readStringRecord(parsed.data.resolutions)
-	} catch {
-		return undefined
-	}
-}
-
-function writeResolutions({
-	content,
-	map
-}: {
-	content: string
-	map: Record<string, string>
-}): string {
-	const pkg: PackageJson = JSON.parse(content)
-	if (Object.keys(map).length > 0) {
-		pkg.resolutions = map
-	} else {
-		delete pkg.resolutions
-	}
-	return `${JSON.stringify(pkg, null, 2)}\n`
-}
-
-export const yarnAudit: AuditCapability = {
+const yarnAudit: AuditCapability = {
 	command: ['yarn', 'npm', 'audit', '--json', '--all', '--recursive'],
 	parseOutput: parseYarnAuditOutput,
 	overrideFile: 'package.json',
@@ -127,8 +91,10 @@ export const yarnAudit: AuditCapability = {
 	// version — the format this tool writes. User resolutions using ranges
 	// are always preserved.
 	isManagedOverride: (_key, value) => parseSemver({ version: value }) !== null,
-	readOverrides: readResolutions,
-	writeOverrides: writeResolutions
+	readOverrides: ({ content }) =>
+		readJsonStringMap({ content, field: 'resolutions' }),
+	writeOverrides: ({ content, map }) =>
+		writeJsonStringMap({ content, field: 'resolutions', map })
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +105,8 @@ export const yarnProvider: CatalogProvider = {
 	id: 'yarn',
 	installCommand: ['yarn', 'install'],
 	lockfileName: 'yarn.lock',
+	// yarn install may update .yarnrc.yml settings alongside the lockfile.
+	installArtifacts: ['yarn.lock', '.yarnrc.yml'],
 	audit: yarnAudit,
 	parseDefinitions: parseYamlCatalogs,
 	applyUpdates: applyYamlCatalogUpdates

@@ -2,11 +2,11 @@ import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
 import { discoverCatalogLocations } from '../src/discover'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type PackageJson } from '../src/schemas'
+import { type JsonObject } from '../src/schemas'
 
 const FIXTURE_DIR = join(import.meta.dir, '.fixtures-discover')
 
-function writePackageJson(dir: string, content: PackageJson): void {
+function writeJsonObject(dir: string, content: JsonObject): void {
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'package.json'), JSON.stringify(content, null, 2))
 }
@@ -26,7 +26,7 @@ afterEach(() => {
 
 describe('discoverCatalogLocations', () => {
   test('finds root bun catalog', async () => {
-    writePackageJson(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
+    writeJsonObject(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
     expect(result).toHaveLength(1)
@@ -39,8 +39,8 @@ describe('discoverCatalogLocations', () => {
   })
 
   test('finds nested bun catalogs', async () => {
-    writePackageJson(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
-    writePackageJson(join(FIXTURE_DIR, 'apps/backend'), { catalog: { express: '5.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'apps/backend'), { catalog: { express: '5.0.0' } })
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
     expect(result.map((l) => l.dir)).toEqual(['apps/backend', 'apps/frontend'])
@@ -82,7 +82,7 @@ describe('discoverCatalogLocations', () => {
   })
 
   test('finds catalogs across all providers in the same repo', async () => {
-    writePackageJson(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
+    writeJsonObject(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
     writeText(FIXTURE_DIR, 'pnpm-workspace.yaml', 'catalog:\n  vue: ^3.5.0\n')
     writeText(FIXTURE_DIR, '.yarnrc.yml', 'catalog:\n  svelte: ^5.0.0\n')
 
@@ -91,7 +91,7 @@ describe('discoverCatalogLocations', () => {
   })
 
   test('skips files without catalog definitions', async () => {
-    writePackageJson(FIXTURE_DIR, { name: 'root', dependencies: { react: '19.0.0' } })
+    writeJsonObject(FIXTURE_DIR, { name: 'root', dependencies: { react: '19.0.0' } })
     writeText(FIXTURE_DIR, 'pnpm-workspace.yaml', 'packages:\n  - packages/*\n')
     writeText(FIXTURE_DIR, '.yarnrc.yml', 'nodeLinker: node-modules\n')
 
@@ -100,41 +100,41 @@ describe('discoverCatalogLocations', () => {
   })
 
   test('skips node_modules', async () => {
-    writePackageJson(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
-    writePackageJson(join(FIXTURE_DIR, 'node_modules/react'), { catalog: { scheduler: '1.0.0' } })
+    writeJsonObject(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'node_modules/react'), { catalog: { scheduler: '1.0.0' } })
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
     expect(result.map((l) => l.dir)).toEqual(['.'])
   })
 
   test('excludes exact directory', async () => {
-    writePackageJson(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
-    writePackageJson(join(FIXTURE_DIR, 'apps/legacy'), { catalog: { jquery: '3.0.0' } })
-    writePackageJson(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
+    writeJsonObject(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'apps/legacy'), { catalog: { jquery: '3.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: ['apps/legacy'] })
     expect(result.map((l) => l.dir)).toEqual(['.', 'apps/frontend'])
   })
 
   test('excludes with glob pattern', async () => {
-    writePackageJson(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
-    writePackageJson(join(FIXTURE_DIR, 'apps/old-api'), { catalog: { express: '4.0.0' } })
-    writePackageJson(join(FIXTURE_DIR, 'apps/old-web'), { catalog: { jquery: '3.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'apps/old-api'), { catalog: { express: '4.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, 'apps/old-web'), { catalog: { jquery: '3.0.0' } })
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: ['apps/old-*'] })
     expect(result.map((l) => l.dir)).toEqual(['apps/frontend'])
   })
 
   test('returns empty array when no catalogs found', async () => {
-    writePackageJson(FIXTURE_DIR, { name: 'root' })
+    writeJsonObject(FIXTURE_DIR, { name: 'root' })
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
     expect(result).toEqual([])
   })
 
   test('skips dotfile directories', async () => {
-    writePackageJson(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
-    writePackageJson(join(FIXTURE_DIR, '.github'), { catalog: { actions: '1.0.0' } })
+    writeJsonObject(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
+    writeJsonObject(join(FIXTURE_DIR, '.github'), { catalog: { actions: '1.0.0' } })
     writeText(join(FIXTURE_DIR, '.yarn'), '.yarnrc.yml', 'catalog:\n  react: ^19.0.0\n')
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
@@ -142,7 +142,7 @@ describe('discoverCatalogLocations', () => {
   })
 
   test('skips catalog with array value (invalid)', async () => {
-    writePackageJson(FIXTURE_DIR, { catalog: ['react', 'vue'] })
+    writeJsonObject(FIXTURE_DIR, { catalog: ['react', 'vue'] })
 
     const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
     expect(result).toEqual([])
@@ -156,7 +156,7 @@ describe('discoverCatalogLocations', () => {
   })
 
   test('finds bun catalogs nested under workspaces', async () => {
-    writePackageJson(FIXTURE_DIR, {
+    writeJsonObject(FIXTURE_DIR, {
       workspaces: { packages: ['packages/*'], catalog: { react: '19.0.0' } }
     })
 

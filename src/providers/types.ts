@@ -6,6 +6,9 @@ import {
 
 export type ProviderId = 'bun' | 'pnpm' | 'yarn'
 
+/** `catalogName` of the singular `catalog` field (as opposed to named catalogs). */
+export const DEFAULT_CATALOG = 'default'
+
 /**
  * A catalog definition parsed out of a definition file. `catalogName` is
  * `'default'` for the singular `catalog` field; anything else references a
@@ -55,8 +58,10 @@ export type CatalogProvider = {
 	installCommand: Array<string>
 	/** Lockfile basename (workDir-relative), deleted to force re-resolution. */
 	lockfileName: string
-	/** Audit + override support; undefined when the provider cannot audit. */
-	audit?: AuditCapability
+	/** Basenames the install command may legitimately write. */
+	installArtifacts: Array<string>
+	/** Audit + override support. */
+	audit: AuditCapability
 	/** Extract every catalog definition from a definition file's content. */
 	parseDefinitions(input: { content: string }): Array<ParsedCatalog>
 	/** Apply catalog updates to a definition file's content. */

@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import { parseFixedVersion, computeOverrides, computeOverrideMap, buildOverridePrBody, isOverrideBranchOutdated, buildOverrideBranchUpdate } from '../src/audit'
 import { overrideKey, isToolOverrideKey } from '../src/utils'
 import { PROVIDERS } from '../src/providers'
-import { type PackageJson } from '../src/schemas'
+import { type JsonObject } from '../src/schemas'
 import { type AuditAdvisory, type AuditResult, type OverrideEntry } from '../src/types'
 
 const bunAudit = PROVIDERS.bun.audit
-const yarnAudit = PROVIDERS.yarn.audit!
+const yarnAudit = PROVIDERS.yarn.audit
 
-const bunFiles = (pkg: PackageJson): Map<string, string | null> =>
+const bunFiles = (pkg: JsonObject): Map<string, string | null> =>
   new Map([['package.json', JSON.stringify(pkg)]])
 const pnpmFiles = (yaml: string): Map<string, string | null> =>
   new Map([['pnpm-workspace.yaml', yaml]])
@@ -76,7 +76,7 @@ describe('computeOverrides', () => {
     }
 
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult,
       catalogNames: new Set(),
       minimumSeverity: 'moderate',
@@ -96,7 +96,7 @@ describe('computeOverrides', () => {
     }
 
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult,
       catalogNames: new Set(['react']),
       minimumSeverity: 'moderate',
@@ -112,7 +112,7 @@ describe('computeOverrides', () => {
     }
 
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult,
       catalogNames: new Set(),
       minimumSeverity: 'high',
@@ -131,7 +131,7 @@ describe('computeOverrides', () => {
     }
 
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult,
       catalogNames: new Set(),
       minimumSeverity: 'moderate',
@@ -153,7 +153,7 @@ describe('computeOverrides', () => {
     }
 
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult,
       catalogNames: new Set(),
       minimumSeverity: 'moderate',
@@ -176,7 +176,7 @@ describe('computeOverrides', () => {
     }
 
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult,
       catalogNames: new Set(),
       minimumSeverity: 'moderate',
@@ -193,7 +193,7 @@ describe('computeOverrides', () => {
     }
 
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult,
       catalogNames: new Set(),
       minimumSeverity: 'moderate',
@@ -205,7 +205,7 @@ describe('computeOverrides', () => {
 
   test('returns empty for no qualifying advisories', () => {
     const result = computeOverrides({
-      keyOf: overrideKey,
+      audit: bunAudit,
       auditResult: {},
       catalogNames: new Set(),
       minimumSeverity: 'moderate',
@@ -381,8 +381,7 @@ describe('buildOverrideBranchUpdate', () => {
         'some-package': '1.0.0' // user override — should be preserved
       },
       overrides,
-      keyOf: overrideKey,
-      isManagedOverride: isToolOverrideKey
+      audit: bunAudit
     })
 
     expect(map).toEqual({
@@ -395,8 +394,7 @@ describe('buildOverrideBranchUpdate', () => {
     const map = computeOverrideMap({
       existing: { 'minimist@<1.2.6': '1.2.6' },
       overrides: [],
-      keyOf: overrideKey,
-      isManagedOverride: isToolOverrideKey
+      audit: bunAudit
     })
 
     expect(map).toEqual({})
@@ -411,8 +409,7 @@ describe('buildOverrideBranchUpdate', () => {
         { packageName: 'lodash', vulnerableRange: '<4.17.21', fixedVersion: '4.17.21', advisories: [makeAdvisory()] },
         { packageName: 'lodash', vulnerableRange: '<4.17.20', fixedVersion: '4.17.22', advisories: [makeAdvisory()] }
       ],
-      keyOf: (entry) => yarnAudit.overrideKey(entry),
-      isManagedOverride: (key, value) => yarnAudit.isManagedOverride(key, value)
+      audit: yarnAudit
     })
 
     expect(map).toEqual({ lodash: '4.17.22' })
@@ -500,7 +497,7 @@ describe('isOverrideBranchOutdated', () => {
   test('reads pnpm overrides from pnpm-workspace.yaml', () => {
     const result = isOverrideBranchOutdated({
       branchFiles: pnpmFiles('packages:\n  - packages/*\noverrides:\n  lodash@<4.17.21: 4.17.21\n'),
-      audit: PROVIDERS.pnpm.audit!,
+      audit: PROVIDERS.pnpm.audit,
       expectedOverrides
     })
     expect(result).toBe(false)

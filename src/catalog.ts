@@ -11,7 +11,7 @@ function detectRangePrefix(raw: string): '^' | '~' | '' {
 	return ''
 }
 
-/** Parse the `catalog` field from package.json into structured entries. */
+/** Parse a catalog entry map (any manager's definition format) into structured entries. */
 export function parseCatalog({
 	catalog
 }: {

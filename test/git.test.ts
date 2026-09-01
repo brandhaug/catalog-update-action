@@ -1,13 +1,17 @@
 import { describe, expect, test, afterAll } from 'bun:test'
-import { rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits } from '../src/git'
 import { type CatalogLocation, type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
-const TEST_DIRS = [
-  '/private/tmp/opencode/git-test-bun',
-  '/private/tmp/opencode/git-test-missing',
-  '/private/tmp/opencode/git-test-pnpm'
-]
+const [bunTestDir, missingTestDir, pnpmTestDir] = [
+  'git-test-bun-',
+  'git-test-missing-',
+  'git-test-pnpm-'
+].map((prefix) => mkdtempSync(join(tmpdir(), prefix)))
+
+const TEST_DIRS = [bunTestDir, missingTestDir, pnpmTestDir]
 
 afterAll(() => {
   for (const dir of TEST_DIRS) {
@@ -146,11 +150,12 @@ describe('buildCatalogBranchUpdate', () => {
     })
 
     expect(result.affectedFiles).toEqual(['package.json'])
+    expect(result.expectedBasenames).toEqual(['package.json', 'bun.lock', 'bun.lockb'])
     expect(result.installCommand).toEqual(['bun', 'install'])
   })
 
   test('apply writes updated catalog to package.json on disk', async () => {
-    const workDir = '/private/tmp/opencode/git-test-bun'
+    const workDir = bunTestDir
     await Bun.write(
       `${workDir}/package.json`,
       JSON.stringify({ name: 'root', catalog: { react: '18.0.0', zod: '3.0.0' } }, null, 2)
@@ -174,7 +179,7 @@ describe('buildCatalogBranchUpdate', () => {
   })
 
   test('apply throws when the catalog is missing', async () => {
-    const workDir = '/private/tmp/opencode/git-test-missing'
+    const workDir = missingTestDir
     await Bun.write(`${workDir}/package.json`, JSON.stringify({ name: 'root' }))
 
     const updates = [makeCandidate({ name: 'react', latestVersion: '19.0.0' })]
@@ -249,7 +254,7 @@ describe('buildCatalogBranchUpdate', () => {
   })
 
   test('pnpm location writes to pnpm-workspace.yaml', async () => {
-    const workDir = '/private/tmp/opencode/git-test-pnpm'
+    const workDir = pnpmTestDir
     await Bun.write(
       `${workDir}/pnpm-workspace.yaml`,
       'packages:\n  - packages/*\n\ncatalog:\n  react: ^18.0.0\n'

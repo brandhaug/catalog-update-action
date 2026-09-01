@@ -68,12 +68,18 @@ export type BranchUpdate = {
 	body: string
 	/** Repo-relative files this update touches (staged after install, read for drift checks) */
 	affectedFiles: Array<string>
+	/**
+	 * Basenames that may legitimately change during install: the affected
+	 * files plus the provider's own artifacts. Used to warn about unexpected
+	 * install writes.
+	 */
+	expectedBasenames: Array<string>
 	/** Writes the update into the checked-out working tree. */
 	apply: () => Promise<void>
 	/**
 	 * Lockfiles (workDir-relative) to delete before running install, forcing
-	 * full re-resolution. Needed for override branches because bun's `@range`
-	 * override syntax is ignored for already-locked packages.
+	 * full re-resolution. Needed for override branches because range-based
+	 * overrides are ignored for already-locked packages.
 	 */
 	deleteLockfiles?: Array<string>
 	/** Install command refreshing the lockfile after applying the update. */

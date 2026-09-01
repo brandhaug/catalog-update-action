@@ -31,7 +31,7 @@ const pnpmAuditOutputSchema = z.object({
 	advisories: z.record(z.string(), pnpmAdvisorySchema)
 })
 
-export function parsePnpmAuditOutput({
+function parsePnpmAuditOutput({
 	output
 }: {
 	output: string
@@ -64,7 +64,7 @@ export function parsePnpmAuditOutput({
 	return result
 }
 
-export const pnpmAudit: AuditCapability = {
+const pnpmAudit: AuditCapability = {
 	command: ['pnpm', 'audit', '--json'],
 	parseOutput: parsePnpmAuditOutput,
 	overrideFile: 'pnpm-workspace.yaml',
@@ -86,6 +86,8 @@ export const pnpmProvider: CatalogProvider = {
 	id: 'pnpm',
 	installCommand: ['pnpm', 'install'],
 	lockfileName: 'pnpm-lock.yaml',
+	// pnpm may rewrite pnpm-workspace.yaml (e.g. when overrides change).
+	installArtifacts: ['pnpm-lock.yaml', 'pnpm-workspace.yaml'],
 	audit: pnpmAudit,
 	parseDefinitions: parseYamlCatalogs,
 	applyUpdates: applyYamlCatalogUpdates

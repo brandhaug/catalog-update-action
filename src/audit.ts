@@ -1,16 +1,16 @@
-import { type AuditCapability, getProvider, type ProviderId } from './providers'
+import {
+	type AuditCapability,
+	expectedInstallBasenames,
+	getProvider,
+	type ProviderId
+} from './providers'
 import {
 	type AuditResult,
 	type BranchUpdate,
 	type OverrideEntry,
 	type Severity
 } from './types'
-import {
-	compareSemver,
-	getOverrideBranchPrefix,
-	PR_FOOTER,
-	overrideKey
-} from './utils'
+import { compareSemver, getOverrideBranchPrefix, PR_FOOTER } from './utils'
 // ---------------------------------------------------------------------------
 // Severity ordering
 // ---------------------------------------------------------------------------
@@ -134,26 +134,24 @@ export function parseFixedVersion({
 export function computeOverrideMap({
 	existing,
 	overrides,
-	keyOf,
-	isManagedOverride
+	audit
 }: {
 	existing: Record<string, string>
 	overrides: Array<OverrideEntry>
-	keyOf: AuditCapability['overrideKey']
-	isManagedOverride: AuditCapability['isManagedOverride']
+	audit: AuditCapability
 }) {
 	const result: Record<string, string> = {}
 
 	// Preserve user-added overrides (not tool-managed)
 	for (const [key, value] of Object.entries(existing)) {
-		if (!isManagedOverride(key, value)) {
+		if (!audit.isManagedOverride(key, value)) {
 			result[key] = value
 		}
 	}
 
 	// Add currently needed tool overrides
 	for (const entry of overrides) {
-		const key = keyOf(entry)
+		const key = audit.overrideKey(entry)
 		const current = result[key]
 		if (
 			current === undefined ||
@@ -163,7 +161,7 @@ export function computeOverrideMap({
 		}
 	}
 
-	return { ...result }
+	return result
 }
 
 export function computeOverrides({
@@ -171,13 +169,13 @@ export function computeOverrides({
 	catalogNames,
 	minimumSeverity,
 	existingOverrides,
-	keyOf
+	audit
 }: {
 	auditResult: AuditResult
 	catalogNames: Set<string>
 	minimumSeverity: Severity
 	existingOverrides: Record<string, string>
-	keyOf: AuditCapability['overrideKey']
+	audit: AuditCapability
 }): Array<OverrideEntry> {
 	const minLevel = SEVERITY_ORDER[minimumSeverity]
 
@@ -201,7 +199,7 @@ export function computeOverrides({
 				continue
 			}
 
-			const groupKey = overrideKey({
+			const groupKey = audit.overrideKey({
 				packageName,
 				vulnerableRange: advisory.vulnerable_versions
 			})
@@ -227,7 +225,7 @@ export function computeOverrides({
 	const entries: Array<OverrideEntry> = []
 
 	for (const group of groupMap.values()) {
-		const existingVersion = existingOverrides[keyOf(group)]
+		const existingVersion = existingOverrides[audit.overrideKey(group)]
 		if (
 			existingVersion &&
 			compareSemver({ a: existingVersion, b: group.fixedVersion }) >= 0
@@ -326,29 +324,23 @@ export function buildOverrideBranchUpdate({
 	const title = `fix(security): override ${n} vulnerable transitive ${n === 1 ? 'dependency' : 'dependencies'}${titleSuffix}`
 	const body = buildOverridePrBody({ overrides })
 	const branch = `${getOverrideBranchPrefix({ branchPrefix })}/vulnerability-fixes`
-	const provider = getProvider({ id: providerId })
-	const audit = provider.audit
-	if (!audit) {
-		throw new Error(`Provider "${providerId}" does not support audit overrides`)
-	}
+	const provider = getProvider(providerId)
+	const { audit } = provider
 	const overridePath = `${workDir}/${audit.overrideFile}`
+	const affectedFiles = [audit.overrideFile]
 
 	return {
 		branch,
 		title,
 		body,
-		affectedFiles: [audit.overrideFile],
+		affectedFiles,
+		expectedBasenames: expectedInstallBasenames({ provider, affectedFiles }),
 		deleteLockfiles: [provider.lockfileName],
 		installCommand: provider.installCommand,
 		apply: async () => {
 			const content = await Bun.file(overridePath).text()
 			const existing = audit.readOverrides({ content }) ?? {}
-			const map = computeOverrideMap({
-				existing,
-				overrides,
-				keyOf: (entry) => audit.overrideKey(entry),
-				isManagedOverride: (key, value) => audit.isManagedOverride(key, value)
-			})
+			const map = computeOverrideMap({ existing, overrides, audit })
 			const updated = audit.writeOverrides({ content, map })
 			await Bun.write(overridePath, updated)
 		}

@@ -37,7 +37,7 @@ export async function discoverCatalogLocations({
 
 	/* oxlint-disable no-await-in-loop */
 	for (const { glob, providerId } of DEFINITION_FILES) {
-		const provider = getProvider({ id: providerId })
+		const provider = getProvider(providerId)
 		const scanner = new Bun.Glob(glob)
 
 		for await (const path of scanner.scan({ cwd, dot: true })) {

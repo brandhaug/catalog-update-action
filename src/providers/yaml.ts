@@ -1,11 +1,8 @@
 import { parse as parseYaml, parseDocument } from 'yaml'
-import { readStringRecord, packageJsonSchema, type JsonValue } from '../schemas'
+import { readStringRecord, jsonObjectSchema, type JsonValue } from '../schemas'
 import { buildCatalogValue } from '../catalog'
 import { type UpdateCandidate } from '../types'
-import { type ParsedCatalog } from './types'
-
-/** Both pnpm and yarn name their default catalog via a singular `catalog` key. */
-export const DEFAULT_CATALOG = 'default'
+import { DEFAULT_CATALOG, type ParsedCatalog } from './types'
 
 /**
  * Check a value is a `Record<string, Record<string, string>>` (the shape of
@@ -14,7 +11,7 @@ export const DEFAULT_CATALOG = 'default'
 function readNamedCatalogs(
 	value: JsonValue | undefined
 ): Record<string, Record<string, string>> | undefined {
-	const parsed = packageJsonSchema.safeParse(value)
+	const parsed = jsonObjectSchema.safeParse(value)
 	if (!parsed.success) {
 		return undefined
 	}
@@ -44,7 +41,7 @@ export function parseYamlCatalogs({
 	try {
 		// Reuse the package.json document schema: both files are mappings of
 		// arbitrary JSON values, so the same validation applies.
-		const parsed = packageJsonSchema.safeParse(parseYaml(content))
+		const parsed = jsonObjectSchema.safeParse(parseYaml(content))
 		if (!parsed.success) {
 			return []
 		}
@@ -115,7 +112,7 @@ export function readYamlTopLevelMap({
 }): Record<string, string> | undefined {
 	let root: Record<string, JsonValue>
 	try {
-		const parsed = packageJsonSchema.safeParse(parseYaml(content))
+		const parsed = jsonObjectSchema.safeParse(parseYaml(content))
 		if (!parsed.success) {
 			return undefined
 		}

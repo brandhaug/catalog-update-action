@@ -11,7 +11,7 @@ import {
 } from './types'
 import { formatReleaseNotes } from './registry'
 import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
-import { getProvider } from './providers'
+import { expectedInstallBasenames, getProvider } from './providers'
 
 // ---------------------------------------------------------------------------
 // Shell execution
@@ -76,17 +76,6 @@ export function buildCatalogPrBody({
 	return lines.join('\n')
 }
 
-export function buildCatalogValue({
-	update
-}: {
-	update: UpdateCandidate
-}): string {
-	if (update.isAlias) {
-		return `npm:${update.npmName}@${update.rangePrefix}${update.latestVersion}`
-	}
-	return `${update.rangePrefix}${update.latestVersion}`
-}
-
 // ---------------------------------------------------------------------------
 // Catalog BranchUpdate builder
 // ---------------------------------------------------------------------------
@@ -112,8 +101,9 @@ export function buildCatalogBranchUpdate({
 }): BranchUpdate {
 	const prefix = branchPrefix ?? config.branchPrefix
 	const branch = `${prefix}/${groupName}`
-	const provider = getProvider({ id: location.providerId })
+	const provider = getProvider(location.providerId)
 	const definitionPath = `${workDir}/${location.definitionRelPath}`
+	const affectedFiles = [location.definitionRelPath]
 	const first = updates[0]
 	const title =
 		first && updates.length === 1
@@ -125,7 +115,8 @@ export function buildCatalogBranchUpdate({
 		branch,
 		title,
 		body,
-		affectedFiles: [location.definitionRelPath],
+		affectedFiles,
+		expectedBasenames: expectedInstallBasenames({ provider, affectedFiles }),
 		installCommand: provider.installCommand,
 		apply: async () => {
 			const content = await Bun.file(definitionPath).text()
@@ -369,6 +360,7 @@ async function updateBranch({
 		title,
 		apply,
 		affectedFiles,
+		expectedBasenames,
 		deleteLockfiles,
 		installCommand
 	} = branchUpdate
@@ -429,18 +421,9 @@ async function updateBranch({
 	})
 	const changedFiles = diffOutput.split('\n').filter(Boolean)
 
-	const expectedBasenames = new Set([
-		'package.json',
-		'bun.lock',
-		'bun.lockb',
-		'package-lock.json',
-		'pnpm-lock.yaml',
-		'pnpm-workspace.yaml',
-		'yarn.lock',
-		'.yarnrc.yml'
-	])
+	const expected = new Set(expectedBasenames)
 	const unexpectedFiles = changedFiles.filter(
-		(f) => !expectedBasenames.has(f.split('/').pop() || f)
+		(f) => !expected.has(f.split('/').pop() || f)
 	)
 	if (unexpectedFiles.length > 0) {
 		console.warn(

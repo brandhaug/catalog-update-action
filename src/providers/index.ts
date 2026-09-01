@@ -19,12 +19,34 @@ export const PROVIDERS = {
 		// expected (successful) case — runAudit reads the JSON output either way.
 		audit: bunAudit,
 		parseDefinitions: parseBunCatalogs,
-		applyUpdates: applyBunCatalogUpdates
+		applyUpdates: applyBunCatalogUpdates,
+		// Older Bun versions write the binary bun.lockb format instead.
+		installArtifacts: ['bun.lock', 'bun.lockb']
 	},
 	pnpm: pnpmProvider,
 	yarn: yarnProvider
 } satisfies Record<ProviderId, CatalogProvider>
 
-export function getProvider({ id }: { id: ProviderId }): CatalogProvider {
+export function getProvider(id: ProviderId): CatalogProvider {
 	return PROVIDERS[id]
+}
+
+/**
+ * Basenames that may legitimately change on disk when the provider's install
+ * runs: the files the update itself touches, plus the provider's own
+ * artifacts. Used to warn about unexpected install writes.
+ */
+export function expectedInstallBasenames({
+	provider,
+	affectedFiles
+}: {
+	provider: CatalogProvider
+	affectedFiles: Array<string>
+}): Array<string> {
+	return [
+		...new Set([
+			...affectedFiles.map((path) => path.split('/').pop() ?? path),
+			...provider.installArtifacts
+		])
+	]
 }

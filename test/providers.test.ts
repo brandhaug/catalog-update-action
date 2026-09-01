@@ -35,12 +35,18 @@ describe('PROVIDERS registry', () => {
     expect(PROVIDERS.pnpm.lockfileName).toBe('pnpm-lock.yaml')
     expect(PROVIDERS.yarn.installCommand).toEqual(['yarn', 'install'])
     expect(PROVIDERS.yarn.lockfileName).toBe('yarn.lock')
+    expect(PROVIDERS.bun.installArtifacts).toEqual(['bun.lock', 'bun.lockb'])
+    expect(PROVIDERS.pnpm.installArtifacts).toEqual([
+      'pnpm-lock.yaml',
+      'pnpm-workspace.yaml'
+    ])
+    expect(PROVIDERS.yarn.installArtifacts).toEqual(['yarn.lock', '.yarnrc.yml'])
   })
 
   test('exposes an audit capability for every provider', () => {
     expect(PROVIDERS.bun.audit.command).toEqual(['bun', 'audit', '--json'])
-    expect(PROVIDERS.pnpm.audit?.command).toEqual(['pnpm', 'audit', '--json'])
-    expect(PROVIDERS.yarn.audit?.command).toEqual([
+    expect(PROVIDERS.pnpm.audit.command).toEqual(['pnpm', 'audit', '--json'])
+    expect(PROVIDERS.yarn.audit.command).toEqual([
       'yarn',
       'npm',
       'audit',
@@ -49,15 +55,15 @@ describe('PROVIDERS registry', () => {
       '--recursive'
     ])
     expect(PROVIDERS.bun.audit.overrideFile).toBe('package.json')
-    expect(PROVIDERS.pnpm.audit?.overrideFile).toBe('pnpm-workspace.yaml')
-    expect(PROVIDERS.yarn.audit?.overrideFile).toBe('package.json')
-    expect(PROVIDERS.yarn.audit?.overrideField).toBe('resolutions')
+    expect(PROVIDERS.pnpm.audit.overrideFile).toBe('pnpm-workspace.yaml')
+    expect(PROVIDERS.yarn.audit.overrideFile).toBe('package.json')
+    expect(PROVIDERS.yarn.audit.overrideField).toBe('resolutions')
   })
 
   test('getProvider resolves by id', () => {
-    expect(getProvider({ id: 'pnpm' }).id).toBe('pnpm')
-    expect(getProvider({ id: 'yarn' }).id).toBe('yarn')
-    expect(getProvider({ id: 'bun' }).id).toBe('bun')
+    expect(getProvider('pnpm').id).toBe('pnpm')
+    expect(getProvider('yarn').id).toBe('yarn')
+    expect(getProvider('bun').id).toBe('bun')
   })
 })
 
@@ -65,7 +71,7 @@ describe('PROVIDERS registry', () => {
 // bun
 // ---------------------------------------------------------------------------
 
-const bun = getProvider({ id: 'bun' })
+const bun = getProvider('bun')
 
 describe('bun provider', () => {
   test('parses top-level catalog and named catalogs', () => {
@@ -173,7 +179,7 @@ describe.each([
   ['pnpm', 'pnpm-workspace.yaml'],
   ['yarn', '.yarnrc.yml']
 ] as const)('%s provider (YAML)', (id, fileName) => {
-  const provider = getProvider({ id })
+  const provider = getProvider(id)
 
   test('parses default and named catalogs', () => {
     const content = [
@@ -362,7 +368,7 @@ describe('audit capabilities', () => {
   })
 
   test('pnpm parses npm-6 style advisories grouped by module_name', () => {
-    const result = PROVIDERS.pnpm.audit!.parseOutput({ output: PNPM_AUDIT_OUTPUT })
+    const result = PROVIDERS.pnpm.audit.parseOutput({ output: PNPM_AUDIT_OUTPUT })
 
     expect(result).toEqual({
       minimist: [
@@ -380,12 +386,12 @@ describe('audit capabilities', () => {
   })
 
   test('pnpm returns null for unexpected formats', () => {
-    expect(PROVIDERS.pnpm.audit!.parseOutput({ output: '{"foo": 1}' })).toBeNull()
-    expect(PROVIDERS.pnpm.audit!.parseOutput({ output: 'fatal: error' })).toBeNull()
+    expect(PROVIDERS.pnpm.audit.parseOutput({ output: '{"foo": 1}' })).toBeNull()
+    expect(PROVIDERS.pnpm.audit.parseOutput({ output: 'fatal: error' })).toBeNull()
   })
 
   test('yarn parses NDJSON advisories with normalized severities', () => {
-    const result = PROVIDERS.yarn.audit!.parseOutput({ output: YARN_AUDIT_OUTPUT })
+    const result = PROVIDERS.yarn.audit.parseOutput({ output: YARN_AUDIT_OUTPUT })
 
     expect(result?.minimist).toEqual([
       {
@@ -400,9 +406,9 @@ describe('audit capabilities', () => {
   })
 
   test('yarn treats empty output as clean and garbage as unparseable', () => {
-    expect(PROVIDERS.yarn.audit!.parseOutput({ output: '' })).toEqual({})
+    expect(PROVIDERS.yarn.audit.parseOutput({ output: '' })).toEqual({})
     expect(
-      PROVIDERS.yarn.audit!.parseOutput({ output: 'not json at all' })
+      PROVIDERS.yarn.audit.parseOutput({ output: 'not json at all' })
     ).toBeNull()
   })
 
@@ -429,7 +435,7 @@ describe('audit capabilities', () => {
   })
 
   test('pnpm reads and writes pnpm-workspace.yaml overrides, preserving comments', () => {
-    const audit = PROVIDERS.pnpm.audit!
+    const audit = PROVIDERS.pnpm.audit
     const content = '# workspace\npackages:\n  - packages/*\noverrides:\n  # security pin\n  minimist@<1.2.6: 1.2.5\n'
 
     expect(audit.readOverrides({ content })).toEqual({
@@ -454,7 +460,7 @@ describe('audit capabilities', () => {
   })
 
   test('yarn reads and writes package.json resolutions', () => {
-    const audit = PROVIDERS.yarn.audit!
+    const audit = PROVIDERS.yarn.audit
     const content = JSON.stringify({
       name: 'root',
       resolutions: { minimist: '1.2.5', 'user-range': '^1.0.0' }
@@ -476,7 +482,7 @@ describe('audit capabilities', () => {
   })
 
   test('yarn keys overrides by package name and owns exact-semver values', () => {
-    const audit = PROVIDERS.yarn.audit!
+    const audit = PROVIDERS.yarn.audit
     expect(audit.overrideKey(minimistOverride)).toBe('minimist')
     expect(audit.isManagedOverride('minimist', '1.2.6')).toBe(true)
     expect(audit.isManagedOverride('some-package', '^2.0.0')).toBe(false)
@@ -484,7 +490,7 @@ describe('audit capabilities', () => {
 
   test('bun and pnpm keys overrides by name@range', () => {
     for (const id of ['bun', 'pnpm'] as const) {
-      const audit = PROVIDERS[id].audit!
+      const audit = PROVIDERS[id].audit
       expect(audit.overrideKey(minimistOverride)).toBe(
         'minimist@>=1.0.0 <1.2.6'
       )

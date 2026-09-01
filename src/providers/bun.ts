@@ -1,23 +1,24 @@
 import { z } from 'zod'
 import {
 	readStringRecord,
-	packageJsonSchema,
+	jsonObjectSchema,
 	severitySchema,
-	type PackageJson,
+	type JsonObject,
 	type JsonValue
 } from '../schemas'
 import { buildCatalogValue } from '../catalog'
 import { isToolOverrideKey, overrideKey } from '../utils'
 import { type AuditResult, type UpdateCandidate } from '../types'
-import { type AuditCapability, type ParsedCatalog } from './types'
-
-const DEFAULT_CATALOG = 'default'
+import {
+	DEFAULT_CATALOG,
+	type AuditCapability,
+	type ParsedCatalog
+} from './types'
+import { readJsonStringMap, writeJsonStringMap } from './json'
 
 /** Validate a value as a JSON object, returning a parsed copy. */
-function readObject(
-	value: JsonValue | undefined
-): Record<string, JsonValue> | undefined {
-	const parsed = packageJsonSchema.safeParse(value)
+function readObject(value: JsonValue | undefined): JsonObject | undefined {
+	const parsed = jsonObjectSchema.safeParse(value)
 	return parsed.success ? parsed.data : undefined
 }
 
@@ -27,65 +28,62 @@ function readObject(
  * four locations are equivalent; the singular fields win for the default
  * catalog when several define it.
  */
-function catalogSectionPaths(pkg: PackageJson): Array<{
+function catalogSections(pkg: JsonObject): Array<{
 	catalogName: string
 	path: Array<string>
+	entries: Record<string, string>
 }> {
 	const workspaces = readObject(pkg.workspaces)
 	const topLevelCatalogs = readObject(pkg.catalogs)
 	const nestedCatalogs = readObject(workspaces?.catalogs)
 
-	const paths: Array<{ catalogName: string; path: Array<string> }> = []
+	const sections: Array<{
+		catalogName: string
+		path: Array<string>
+		entries: Record<string, string>
+	}> = []
 
 	// Named catalogs live under a `catalogs` key; anything else is the default.
-	const consider = (path: Array<string>): void => {
-		const isNamed = path.length >= 2 && path.at(-2) === 'catalogs'
-		paths.push({
-			catalogName: isNamed ? String(path.at(-1)) : DEFAULT_CATALOG,
-			path
-		})
-	}
-
-	const considerIfObject = (
+	const consider = (
 		path: Array<string>,
 		value: JsonValue | undefined
 	): void => {
-		if (readObject(value)) {
-			consider(path)
+		const entries = readStringRecord(value)
+		if (!entries) {
+			return
 		}
+		const isNamed = path.length >= 2 && path.at(-2) === 'catalogs'
+		sections.push({
+			catalogName: isNamed ? String(path.at(-1)) : DEFAULT_CATALOG,
+			path,
+			entries
+		})
 	}
 
-	considerIfObject(['catalog'], pkg.catalog)
-	considerIfObject(['workspaces', 'catalog'], workspaces?.catalog)
-	considerIfObject(
-		['catalogs', DEFAULT_CATALOG],
-		topLevelCatalogs?.[DEFAULT_CATALOG]
-	)
-	considerIfObject(
+	consider(['catalog'], pkg.catalog)
+	consider(['workspaces', 'catalog'], workspaces?.catalog)
+	consider(['catalogs', DEFAULT_CATALOG], topLevelCatalogs?.[DEFAULT_CATALOG])
+	consider(
 		['workspaces', 'catalogs', DEFAULT_CATALOG],
 		nestedCatalogs?.[DEFAULT_CATALOG]
 	)
-
-	const addNamed = (
-		catalogs: Record<string, JsonValue> | undefined,
-		prefix: Array<string>
-	): void => {
-		for (const name of Object.keys(catalogs ?? {})) {
-			if (name === DEFAULT_CATALOG) {
-				continue
-			}
-			considerIfObject([...prefix, 'catalogs', name], catalogs?.[name])
+	for (const name of Object.keys(topLevelCatalogs ?? {})) {
+		if (name !== DEFAULT_CATALOG) {
+			consider(['catalogs', name], topLevelCatalogs?.[name])
 		}
 	}
-	addNamed(topLevelCatalogs, [])
-	addNamed(nestedCatalogs, ['workspaces'])
+	for (const name of Object.keys(nestedCatalogs ?? {})) {
+		if (name !== DEFAULT_CATALOG) {
+			consider(['workspaces', 'catalogs', name], nestedCatalogs?.[name])
+		}
+	}
 
-	return paths
+	return sections
 }
 
 /** Rebuild the tree along `path`, applying catalog updates at the leaf. */
 function withCatalogUpdates(
-	node: Record<string, JsonValue>,
+	node: JsonObject,
 	path: Array<string>,
 	updates: Array<UpdateCandidate>
 ) {
@@ -113,9 +111,9 @@ export function parseBunCatalogs({
 }: {
 	content: string
 }): Array<ParsedCatalog> {
-	let pkg: PackageJson
+	let pkg: JsonObject
 	try {
-		const parsed = packageJsonSchema.safeParse(JSON.parse(content))
+		const parsed = jsonObjectSchema.safeParse(JSON.parse(content))
 		if (!parsed.success) {
 			return []
 		}
@@ -126,22 +124,15 @@ export function parseBunCatalogs({
 
 	const seen = new Set<string>()
 	const catalogs: Array<ParsedCatalog> = []
-	for (const section of catalogSectionPaths(pkg)) {
+	for (const section of catalogSections(pkg)) {
 		if (seen.has(section.catalogName)) {
 			continue
 		}
-		// Resolve the section content by re-walking the tree so the entries
-		// reflect the document actually being inspected.
-		let node: Record<string, JsonValue> | undefined = pkg
-		for (const key of section.path) {
-			node = node && readObject(node[key])
-		}
-		const entries = readStringRecord(node)
-		if (!entries) {
-			continue
-		}
 		seen.add(section.catalogName)
-		catalogs.push({ catalogName: section.catalogName, entries })
+		catalogs.push({
+			catalogName: section.catalogName,
+			entries: section.entries
+		})
 	}
 	return catalogs
 }
@@ -155,9 +146,9 @@ export function applyBunCatalogUpdates({
 	catalogName: string
 	updates: Array<UpdateCandidate>
 }): string {
-	let pkg: PackageJson
+	let pkg: JsonObject
 	try {
-		const parsed = packageJsonSchema.safeParse(JSON.parse(content))
+		const parsed = jsonObjectSchema.safeParse(JSON.parse(content))
 		if (!parsed.success) {
 			throw new Error('invalid package.json')
 		}
@@ -166,7 +157,7 @@ export function applyBunCatalogUpdates({
 		throw new Error('Invalid package.json')
 	}
 
-	const section = catalogSectionPaths(pkg).find(
+	const section = catalogSections(pkg).find(
 		(candidate) => candidate.catalogName === catalogName
 	)
 	if (!section) {
@@ -195,7 +186,7 @@ const bunAdvisorySchema = z.object({
 const bunAuditResultSchema = z.record(z.string(), z.array(bunAdvisorySchema))
 
 /** bun audit reports advisories grouped by package name, matching AuditResult. */
-export function parseBunAuditOutput({
+function parseBunAuditOutput({
 	output
 }: {
 	output: string
@@ -208,24 +199,6 @@ export function parseBunAuditOutput({
 	}
 }
 
-function readJsonField({
-	content,
-	field
-}: {
-	content: string
-	field: string
-}): Record<string, string> | undefined {
-	try {
-		const parsed = packageJsonSchema.safeParse(JSON.parse(content))
-		if (!parsed.success) {
-			return undefined
-		}
-		return readStringRecord(parsed.data[field])
-	} catch {
-		return undefined
-	}
-}
-
 export const bunAudit: AuditCapability = {
 	command: ['bun', 'audit', '--json'],
 	parseOutput: parseBunAuditOutput,
@@ -234,14 +207,7 @@ export const bunAudit: AuditCapability = {
 	overrideKey,
 	isManagedOverride: (key) => isToolOverrideKey(key),
 	readOverrides: ({ content }) =>
-		readJsonField({ content, field: 'overrides' }),
-	writeOverrides: ({ content, map }) => {
-		const pkg: PackageJson = JSON.parse(content)
-		if (Object.keys(map).length > 0) {
-			pkg.overrides = map
-		} else {
-			delete pkg.overrides
-		}
-		return `${JSON.stringify(pkg, null, 2)}\n`
-	}
+		readJsonStringMap({ content, field: 'overrides' }),
+	writeOverrides: ({ content, map }) =>
+		writeJsonStringMap({ content, field: 'overrides', map })
 }

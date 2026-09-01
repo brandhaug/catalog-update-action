@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { severitySchema, packageJsonSchema } from './schemas'
+import { severitySchema, jsonObjectSchema } from './schemas'
 import {
 	type AutoMergeConfig,
 	type AuditConfig,
@@ -169,7 +169,7 @@ export async function loadConfig({
 		const parsed = await file.json()
 		// The manager is now detected from the catalog definition files, so
 		// this legacy option is meaningless — warn rather than silently drop.
-		const asObject = packageJsonSchema.safeParse(parsed)
+		const asObject = jsonObjectSchema.safeParse(parsed)
 		if (asObject.success && 'packageManager' in asObject.data) {
 			console.warn(
 				'Warning: "packageManager" config is no longer used. The package manager is detected from your catalog definition files (package.json / pnpm-workspace.yaml / .yarnrc.yml).'
