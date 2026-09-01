@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { severitySchema } from './schemas'
+import { severitySchema, packageJsonSchema } from './schemas'
 import {
 	type AutoMergeConfig,
 	type AuditConfig,
@@ -24,7 +24,6 @@ const DEFAULT_CONFIG: Config = {
 	defaultBranch: 'master',
 	maxOpenPrs: 20,
 	concurrency: 10,
-	packageManager: 'bun',
 	minReleaseAgeDays: 0,
 	groups: [],
 	ignore: [],
@@ -39,7 +38,6 @@ const semverChangeSchema = z.enum([
 	'prerelease',
 	'release'
 ])
-const packageManagerSchema = z.enum(['bun', 'npm', 'pnpm', 'yarn'])
 const mergeMethodSchema = z.enum(['squash', 'merge', 'rebase'])
 
 /**
@@ -137,7 +135,6 @@ const configSchema = z.object({
 	defaultBranch: z.string().catch(DEFAULT_CONFIG.defaultBranch),
 	maxOpenPrs: z.number().catch(DEFAULT_CONFIG.maxOpenPrs),
 	concurrency: z.number().catch(DEFAULT_CONFIG.concurrency),
-	packageManager: packageManagerSchema.catch(DEFAULT_CONFIG.packageManager),
 	minReleaseAgeDays: z
 		.number()
 		.int()
@@ -170,6 +167,14 @@ export async function loadConfig({
 		}
 
 		const parsed = await file.json()
+		// The manager is now detected from the catalog definition files, so
+		// this legacy option is meaningless — warn rather than silently drop.
+		const asObject = packageJsonSchema.safeParse(parsed)
+		if (asObject.success && 'packageManager' in asObject.data) {
+			console.warn(
+				'Warning: "packageManager" config is no longer used. The package manager is detected from your catalog definition files (package.json / pnpm-workspace.yaml / .yarnrc.yml).'
+			)
+		}
 		const result = configSchema.safeParse(parsed)
 		if (!result.success) {
 			console.warn(

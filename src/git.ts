@@ -2,6 +2,7 @@ import { unlinkSync } from 'node:fs'
 import { z } from 'zod'
 import {
 	type BranchUpdate,
+	type CatalogLocation,
 	type Config,
 	type DirectoryContext,
 	type ExistingPr,
@@ -10,11 +11,7 @@ import {
 } from './types'
 import { formatReleaseNotes } from './registry'
 import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
-import {
-	packageJsonSchema,
-	readStringRecord,
-	type PackageJson
-} from './schemas'
+import { getProvider } from './providers'
 
 // ---------------------------------------------------------------------------
 // Shell execution
@@ -49,20 +46,6 @@ export async function exec({
 
 	return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode }
 }
-
-// ---------------------------------------------------------------------------
-// Install command
-// ---------------------------------------------------------------------------
-
-const PACKAGE_MANAGERS = {
-	bun: { install: ['bun', 'install'], lockfile: 'bun.lock' },
-	npm: { install: ['npm', 'install'], lockfile: 'package-lock.json' },
-	pnpm: { install: ['pnpm', 'install'], lockfile: 'pnpm-lock.yaml' },
-	yarn: { install: ['yarn', 'install'], lockfile: 'yarn.lock' }
-} satisfies Record<
-	Config['packageManager'],
-	{ install: Array<string>; lockfile: string }
->
 
 // ---------------------------------------------------------------------------
 // Catalog PR body
@@ -112,6 +95,8 @@ export function buildCatalogBranchUpdate({
 	groupName,
 	updates,
 	config,
+	location,
+	workDir,
 	titleSuffix = '',
 	branchPrefix,
 	releaseNotes
@@ -119,12 +104,16 @@ export function buildCatalogBranchUpdate({
 	groupName: string
 	updates: Array<UpdateCandidate>
 	config: Config
+	location: CatalogLocation
+	workDir: string
 	titleSuffix?: string
 	branchPrefix?: string
 	releaseNotes: Map<string, Array<VersionReleaseNote>>
 }): BranchUpdate {
 	const prefix = branchPrefix ?? config.branchPrefix
 	const branch = `${prefix}/${groupName}`
+	const provider = getProvider({ id: location.providerId })
+	const definitionPath = `${workDir}/${location.definitionRelPath}`
 	const first = updates[0]
 	const title =
 		first && updates.length === 1
@@ -136,15 +125,16 @@ export function buildCatalogBranchUpdate({
 		branch,
 		title,
 		body,
-		applyChanges: (packageJson) => {
-			const catalog = readStringRecord(packageJson.catalog)
-			if (!catalog) {
-				throw new Error(`No valid catalog found in package.json`)
-			}
-			for (const update of updates) {
-				catalog[update.name] = buildCatalogValue({ update })
-			}
-			packageJson.catalog = catalog
+		affectedFiles: [location.definitionRelPath],
+		installCommand: provider.installCommand,
+		apply: async () => {
+			const content = await Bun.file(definitionPath).text()
+			const updated = provider.applyUpdates({
+				content,
+				catalogName: location.definition.catalogName,
+				updates
+			})
+			await Bun.write(definitionPath, updated)
 		}
 	}
 }
@@ -321,30 +311,25 @@ async function isBranchBehindDefault({
 	return Number(stdout) > 0
 }
 
-async function readBranchPackageJson({
+/** Read a single file from a remote branch via `git show`; null when absent. */
+async function readBranchFile({
 	branch,
-	cwd,
-	packageJsonRelPath
+	relPath,
+	cwd
 }: {
 	branch: string
+	relPath: string
 	cwd: string
-	packageJsonRelPath: string
-}): Promise<PackageJson | null> {
+}): Promise<string | null> {
 	const { stdout, exitCode } = await exec({
-		command: ['git', 'show', `origin/${branch}:${packageJsonRelPath}`],
+		command: ['git', 'show', `origin/${branch}:${relPath}`],
 		cwd
 	})
 
 	if (exitCode !== 0) {
 		return null
 	}
-
-	try {
-		const parsed = packageJsonSchema.safeParse(JSON.parse(stdout))
-		return parsed.success ? parsed.data : null
-	} catch {
-		return null
-	}
+	return stdout
 }
 
 async function returnToDefault({
@@ -379,8 +364,15 @@ async function updateBranch({
 	config: Config
 	dir: DirectoryContext
 }): Promise<{ success: boolean }> {
-	const { branch, title, applyChanges, deleteLockfile } = branchUpdate
-	const { cwd, workDir, packageJsonPath, packageJsonRelPath } = dir
+	const {
+		branch,
+		title,
+		apply,
+		affectedFiles,
+		deleteLockfiles,
+		installCommand
+	} = branchUpdate
+	const { cwd, workDir } = dir
 
 	const checkoutResult = await exec({
 		command: [
@@ -404,20 +396,16 @@ async function updateBranch({
 		return { success: false }
 	}
 
-	const packageJson = await Bun.file(packageJsonPath).json()
-
 	try {
-		applyChanges(packageJson)
+		await apply()
 	} catch (error: unknown) {
 		return fail(`  ${String(error)}`)
 	}
 
-	await Bun.write(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`)
-
-	// Bun's @range override syntax is ignored for already-locked packages.
+	// Range-based override syntax is ignored for already-locked packages.
 	// Deleting the lockfile forces a full re-resolution so overrides apply.
-	if (deleteLockfile) {
-		const lockfileName = PACKAGE_MANAGERS[config.packageManager].lockfile
+	/* oxlint-disable no-await-in-loop */
+	for (const lockfileName of deleteLockfiles ?? []) {
 		const lockfilePath = `${workDir}/${lockfileName}`
 		const exists = await Bun.file(lockfilePath).exists()
 		if (exists) {
@@ -427,12 +415,10 @@ async function updateBranch({
 			)
 		}
 	}
+	/* oxlint-enable no-await-in-loop */
 
 	console.log('  Running install...')
-	const installResult = await exec({
-		command: PACKAGE_MANAGERS[config.packageManager].install,
-		cwd: workDir
-	})
+	const installResult = await exec({ command: installCommand, cwd: workDir })
 	if (installResult.exitCode !== 0) {
 		return fail(`  Failed to run install for branch "${branch}"`)
 	}
@@ -443,15 +429,18 @@ async function updateBranch({
 	})
 	const changedFiles = diffOutput.split('\n').filter(Boolean)
 
-	const lockfileBasenames = new Set([
+	const expectedBasenames = new Set([
 		'package.json',
 		'bun.lock',
+		'bun.lockb',
 		'package-lock.json',
 		'pnpm-lock.yaml',
-		'yarn.lock'
+		'pnpm-workspace.yaml',
+		'yarn.lock',
+		'.yarnrc.yml'
 	])
 	const unexpectedFiles = changedFiles.filter(
-		(f) => !lockfileBasenames.has(f.split('/').pop() || f)
+		(f) => !expectedBasenames.has(f.split('/').pop() || f)
 	)
 	if (unexpectedFiles.length > 0) {
 		console.warn(
@@ -460,7 +449,7 @@ async function updateBranch({
 	}
 
 	await exec({
-		command: ['git', 'add', packageJsonRelPath, ...changedFiles],
+		command: ['git', 'add', ...affectedFiles, ...changedFiles],
 		cwd
 	})
 
@@ -613,16 +602,17 @@ export async function createPr({
 export async function syncExistingPrs({
 	existingPrs,
 	resolveBranchUpdate,
-	isBranchContentOutdated,
+	isBranchOutdated,
 	config,
 	dir
 }: {
 	existingPrs: Array<ExistingPr>
 	resolveBranchUpdate: (branchName: string) => BranchUpdate | null
-	isBranchContentOutdated: (
-		branchPackageJson: PackageJson,
-		branchName: string
-	) => boolean
+	isBranchOutdated: (input: {
+		branchUpdate: BranchUpdate
+		/** Content of each affected file on the branch (null when absent) */
+		branchFiles: Map<string, string | null>
+	}) => boolean
 	config: Config
 	dir: DirectoryContext
 }): Promise<{ closedCount: number; rebuiltCount: number }> {
@@ -688,13 +678,18 @@ export async function syncExistingPrs({
 
 		let hasContentChanges = false
 		if (!isConflicting && !behindDefault) {
-			const branchPkg = await readBranchPackageJson({
-				branch: pr.headRefName,
-				cwd: dir.cwd,
-				packageJsonRelPath: dir.packageJsonRelPath
-			})
-			hasContentChanges =
-				!branchPkg || isBranchContentOutdated(branchPkg, pr.headRefName)
+			const branchFiles = new Map<string, string | null>()
+			for (const relPath of branchUpdate.affectedFiles) {
+				branchFiles.set(
+					relPath,
+					await readBranchFile({
+						branch: pr.headRefName,
+						relPath,
+						cwd: dir.cwd
+					})
+				)
+			}
+			hasContentChanges = isBranchOutdated({ branchUpdate, branchFiles })
 		}
 
 		if (!isConflicting && !behindDefault && !hasContentChanges) {

@@ -1,7 +1,7 @@
 {
   "name": "catalog-update-action",
   "version": "0.12.2",
-  "description": "Automated dependency updates for Bun catalog: protocol",
+  "description": "Automated dependency updates for catalog: protocol monorepos (Bun, pnpm, Yarn)",
   "license": "MIT",
   "author": "brandhaug",
   "homepage": "https://github.com/brandhaug/catalog-update-action#readme",
@@ -14,6 +14,8 @@
   },
   "keywords": [
     "bun",
+    "pnpm",
+    "yarn",
     "catalog",
     "dependabot",
     "dependency-updates",
@@ -58,6 +60,7 @@
   "packageManager": "bun@1.4.0",
   "workspaces": [],
   "dependencies": {
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   }
 }

@@ -1,4 +1,5 @@
-import { type PackageJson, type Severity } from './schemas'
+import { type ParsedCatalog, type ProviderId } from './providers'
+import { type Severity } from './schemas'
 export type { Severity } from './schemas'
 
 export type SemverChange =
@@ -18,8 +19,9 @@ export type AuditAdvisory = {
 	title: string
 	severity: Severity
 	vulnerable_versions: string
-	cwe: Array<string>
-	cvss: { score: number; vectorString: string }
+	/** Not reported by every audit tool (e.g. Yarn omits it). */
+	cwe?: Array<string>
+	cvss?: { score: number; vectorString: string }
 }
 
 export type AuditResult = Record<string, Array<AuditAdvisory>>
@@ -34,18 +36,26 @@ export type OverrideEntry = {
 }
 
 // ---------------------------------------------------------------------------
-// Directory context (for multi-directory / monorepo support)
+// Catalog locations (for multi-directory / multi-manager / monorepo support)
 // ---------------------------------------------------------------------------
+
+/** A catalog definition found somewhere in the repository. */
+export type CatalogLocation = {
+	/** Repo-relative directory containing the definition (`'.'` for the root) */
+	dir: string
+	/** Package manager that owns the catalog format */
+	providerId: ProviderId
+	/** Repo-relative path of the file defining the catalog */
+	definitionRelPath: string
+	/** The parsed definition this location points at */
+	definition: ParsedCatalog
+}
 
 export type DirectoryContext = {
 	/** Repo root (absolute path, used for git operations) */
 	cwd: string
 	/** Project directory (absolute path, used for install/audit) */
 	workDir: string
-	/** Absolute path to package.json */
-	packageJsonPath: string
-	/** Repo-relative path to package.json (for git show / git add) */
-	packageJsonRelPath: string
 }
 
 // ---------------------------------------------------------------------------
@@ -56,14 +66,18 @@ export type BranchUpdate = {
 	branch: string
 	title: string
 	body: string
-	/** Mutates the given packageJson object in place to apply this update's changes. */
-	applyChanges: (packageJson: PackageJson) => void
+	/** Repo-relative files this update touches (staged after install, read for drift checks) */
+	affectedFiles: Array<string>
+	/** Writes the update into the checked-out working tree. */
+	apply: () => Promise<void>
 	/**
-	 * When true, delete the lockfile before running install to force full
-	 * re-resolution.  Needed for override branches because bun's `@range`
+	 * Lockfiles (workDir-relative) to delete before running install, forcing
+	 * full re-resolution. Needed for override branches because bun's `@range`
 	 * override syntax is ignored for already-locked packages.
 	 */
-	deleteLockfile?: boolean
+	deleteLockfiles?: Array<string>
+	/** Install command refreshing the lockfile after applying the update. */
+	installCommand: Array<string>
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +157,6 @@ export type Config = {
 	defaultBranch: string
 	maxOpenPrs: number
 	concurrency: number
-	packageManager: 'bun' | 'npm' | 'pnpm' | 'yarn'
 	minReleaseAgeDays: number
 	groups: Array<GroupDefinition>
 	ignore: Array<IgnoreRule>

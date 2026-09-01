@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { parseCatalog } from '../src/catalog'
+import { parseCatalog, buildCatalogValue } from '../src/catalog'
 
 describe('parseCatalog', () => {
   test('parses standard versions', () => {
@@ -126,5 +126,82 @@ describe('parseCatalog', () => {
       currentVersion: '8.0.0',
       rangePrefix: "^"
     })
+  })
+})
+
+describe('buildCatalogValue', () => {
+  test('returns plain version for non-caret, non-alias', () => {
+    const result = buildCatalogValue({
+      update: {
+        name: 'react',
+        npmName: 'react',
+        currentVersion: '18.0.0',
+        latestVersion: '19.1.0',
+        changeType: 'major',
+        rangePrefix: "",
+        isAlias: false
+      }
+    })
+    expect(result).toBe('19.1.0')
+  })
+
+  test('returns caret version', () => {
+    const result = buildCatalogValue({
+      update: {
+        name: 'react',
+        npmName: 'react',
+        currentVersion: '18.0.0',
+        latestVersion: '19.1.0',
+        changeType: 'major',
+        rangePrefix: "^",
+        isAlias: false
+      }
+    })
+    expect(result).toBe('^19.1.0')
+  })
+
+  test('returns tilde version', () => {
+    const result = buildCatalogValue({
+      update: {
+        name: 'lodash',
+        npmName: 'lodash',
+        currentVersion: '4.17.0',
+        latestVersion: '4.18.0',
+        changeType: 'minor',
+        rangePrefix: "~",
+        isAlias: false
+      }
+    })
+    expect(result).toBe('~4.18.0')
+  })
+
+  test('returns npm: alias format', () => {
+    const result = buildCatalogValue({
+      update: {
+        name: 'vite',
+        npmName: 'rolldown-vite',
+        currentVersion: '7.3.1',
+        latestVersion: '7.4.0',
+        changeType: 'minor',
+        rangePrefix: "",
+        isAlias: true
+      }
+    })
+    expect(result).toBe('npm:rolldown-vite@7.4.0')
+  })
+
+  test('returns npm: alias format with caret', () => {
+    const result = buildCatalogValue({
+      update: {
+        name: 'vite',
+        npmName: 'rolldown-vite',
+        currentVersion: '7.3.1',
+        latestVersion: '7.4.0',
+        changeType: 'minor',
+        rangePrefix: "^",
+        isAlias: true
+      }
+    })
+    expect(result).toBe('npm:rolldown-vite@^7.4.0')
   })
 })

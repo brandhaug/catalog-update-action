@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { version as packageVersion } from '../package.json'
 import { loadConfig } from './config'
-import { parseCatalog } from './catalog'
-import { discoverCatalogDirectories } from './discover'
+import { buildCatalogValue, parseCatalog } from './catalog'
+import { discoverCatalogLocations } from './discover'
 import {
 	queryNpmRegistry,
 	queryPackageMetadata,
@@ -15,8 +15,7 @@ import {
 	getExistingPrs,
 	syncExistingPrs,
 	createPr,
-	buildCatalogBranchUpdate,
-	buildCatalogValue
+	buildCatalogBranchUpdate
 } from './git'
 import {
 	runAudit,
@@ -24,15 +23,16 @@ import {
 	buildOverrideBranchUpdate,
 	isOverrideBranchOutdated
 } from './audit'
+import { getProvider, type ParsedCatalog } from './providers'
 import {
 	classifySemverChange,
 	Semaphore,
 	getOverrideBranchPrefix
 } from './utils'
-import { readStringRecord, type PackageJson } from './schemas'
 import {
 	type BranchUpdate,
 	type CatalogEntry,
+	type CatalogLocation,
 	type Config,
 	type DirectoryContext,
 	type ExistingPr,
@@ -46,7 +46,8 @@ import {
 // ---------------------------------------------------------------------------
 
 const HELP_TEXT = `
-catalog-update — Automated dependency updates for Bun catalog: protocol
+catalog-update — Automated dependency updates for the catalog: protocol
+(Bun, pnpm and Yarn catalogs)
 
 Usage:
   catalog-update [options]
@@ -149,25 +150,19 @@ function parseArgs() {
 }
 
 // ---------------------------------------------------------------------------
-// Per-directory pipeline stages
+// Per-catalog pipeline stages
 // ---------------------------------------------------------------------------
 
 function buildDirectoryContext({
 	cwd,
-	workingDirectory
+	dir
 }: {
 	cwd: string
-	workingDirectory: string
+	dir: string
 }): DirectoryContext {
-	const isRoot = workingDirectory === '.'
-	const workDir = isRoot ? cwd : `${cwd}/${workingDirectory}`
 	return {
 		cwd,
-		workDir,
-		packageJsonPath: `${workDir}/package.json`,
-		packageJsonRelPath: isRoot
-			? 'package.json'
-			: `${workingDirectory}/package.json`
+		workDir: dir === '.' ? cwd : `${cwd}/${dir}`
 	}
 }
 
@@ -184,7 +179,6 @@ async function loadConfigForDirectory({
 	})
 	console.log(`    Branch prefix: ${config.branchPrefix}`)
 	console.log(`    Default branch: ${config.defaultBranch}`)
-	console.log(`    Package manager: ${config.packageManager}`)
 	console.log(`    Groups: ${config.groups.length}`)
 	console.log(`    Ignore rules: ${config.ignore.length}`)
 	console.log(
@@ -316,15 +310,17 @@ async function buildGroupedUpdates({
 async function findOverrideUpdates({
 	dir,
 	config,
+	providerId,
 	entries,
-	packageJson,
+	existingOverrides,
 	effectiveBranchPrefix,
 	titleSuffix
 }: {
 	dir: DirectoryContext
 	config: Config
+	providerId: CatalogLocation['providerId']
 	entries: Array<CatalogEntry>
-	packageJson: PackageJson
+	existingOverrides: Record<string, string>
 	effectiveBranchPrefix: string
 	titleSuffix: string
 }): Promise<{
@@ -335,21 +331,27 @@ async function findOverrideUpdates({
 		return { overrideBranchUpdate: null, overrideEntries: [] }
 	}
 
-	console.log('  Running bun audit...')
-	const auditResult = await runAudit({ cwd: dir.workDir })
+	const provider = getProvider({ id: providerId })
+	const audit = provider.audit
+	if (!audit) {
+		return { overrideBranchUpdate: null, overrideEntries: [] }
+	}
+
+	console.log(`  Running ${providerId} audit...`)
+	const auditResult = await runAudit({ cwd: dir.workDir, audit })
 
 	if (!auditResult) {
-		console.log('    bun audit unavailable or failed, skipping')
+		console.log('    Audit unavailable or failed, skipping')
 		return { overrideBranchUpdate: null, overrideEntries: [] }
 	}
 
 	const catalogNames = new Set(entries.map((e) => e.name))
-	const existingOverrides = readStringRecord(packageJson.overrides) ?? {}
 	const overrideEntries = computeOverrides({
 		auditResult,
 		catalogNames,
 		minimumSeverity: config.audit.minimumSeverity,
-		existingOverrides
+		existingOverrides,
+		keyOf: (entry) => audit.overrideKey(entry)
 	})
 
 	if (overrideEntries.length === 0) {
@@ -374,7 +376,9 @@ async function findOverrideUpdates({
 	const overrideBranchUpdate = buildOverrideBranchUpdate({
 		overrides: overrideEntries,
 		branchPrefix: effectiveBranchPrefix,
-		titleSuffix
+		titleSuffix,
+		workDir: dir.workDir,
+		providerId
 	})
 
 	return { overrideBranchUpdate, overrideEntries }
@@ -393,6 +397,7 @@ function groupNameFromBranch({
 async function syncDirectoryPrs({
 	dir,
 	config,
+	location,
 	groups,
 	releaseNotes,
 	titleSuffix,
@@ -402,6 +407,7 @@ async function syncDirectoryPrs({
 }: {
 	dir: DirectoryContext
 	config: Config
+	location: CatalogLocation
 	groups: Map<string, Array<UpdateCandidate>>
 	releaseNotes: Map<string, Array<VersionReleaseNote>>
 	titleSuffix: string
@@ -447,31 +453,40 @@ async function syncDirectoryPrs({
 				groupName,
 				updates,
 				config,
+				location,
+				workDir: dir.workDir,
 				titleSuffix,
 				branchPrefix: effectiveBranchPrefix,
 				releaseNotes
 			})
 		},
-		isBranchContentOutdated: (branchPkg: PackageJson, branchName: string) => {
+		isBranchOutdated: ({ branchUpdate, branchFiles }) => {
+			const definitionContent = branchFiles.get(location.definitionRelPath)
+			if (definitionContent === null || definitionContent === undefined) {
+				return true
+			}
 			const groupName = groupNameFromBranch({
-				branchName,
+				branchName: branchUpdate.branch,
 				branchPrefix: effectiveBranchPrefix
 			})
 			const updates = groups.get(groupName)
-			if (!updates) {
+			if (!updates || updates.length === 0) {
 				return true
 			}
-			const branchCatalog = readStringRecord(branchPkg.catalog)
-			if (!branchCatalog) {
+			const provider = getProvider({ id: location.providerId })
+			const definitions = provider.parseDefinitions({
+				content: definitionContent
+			})
+			const definition = definitions.find(
+				(d) => d.catalogName === location.definition.catalogName
+			)
+			if (!definition) {
 				return true
 			}
-			for (const update of updates) {
-				const expected = buildCatalogValue({ update })
-				if (branchCatalog[update.name] !== expected) {
-					return true
-				}
-			}
-			return false
+			return updates.some(
+				(update) =>
+					definition.entries[update.name] !== buildCatalogValue({ update })
+			)
 		},
 		config,
 		dir
@@ -479,14 +494,16 @@ async function syncDirectoryPrs({
 
 	// 6c. Sync existing override PRs
 	let overrideSyncResult = { closedCount: 0, rebuiltCount: 0 }
-	if (overridePrs.length > 0) {
+	const audit = getProvider({ id: location.providerId }).audit
+	if (overridePrs.length > 0 && audit) {
 		console.log('  Syncing existing override PRs...')
 		overrideSyncResult = await syncExistingPrs({
 			existingPrs: overridePrs,
 			resolveBranchUpdate: (_branchName: string) => overrideBranchUpdate,
-			isBranchContentOutdated: (branchPkg: PackageJson) => {
+			isBranchOutdated: ({ branchFiles }) => {
 				return isOverrideBranchOutdated({
-					branchPackageJson: branchPkg,
+					branchFiles,
+					audit,
 					expectedOverrides: overrideEntries
 				})
 			},
@@ -506,6 +523,7 @@ async function syncDirectoryPrs({
 async function createDirectoryPrs({
 	dir,
 	config,
+	location,
 	existingPrs,
 	closedCount,
 	groups,
@@ -516,6 +534,7 @@ async function createDirectoryPrs({
 }: {
 	dir: DirectoryContext
 	config: Config
+	location: CatalogLocation
 	existingPrs: Array<ExistingPr>
 	closedCount: number
 	groups: Map<string, Array<UpdateCandidate>>
@@ -578,6 +597,8 @@ async function createDirectoryPrs({
 			groupName,
 			updates,
 			config,
+			location,
+			workDir: dir.workDir,
 			titleSuffix,
 			branchPrefix: effectiveBranchPrefix,
 			releaseNotes
@@ -600,35 +621,66 @@ async function createDirectoryPrs({
 	return { created, failed }
 }
 
-async function processDirectory({
-	workingDirectory,
+async function processCatalog({
+	location,
 	cwd,
 	configPath,
 	dryRun
 }: {
-	workingDirectory: string
+	location: CatalogLocation
 	cwd: string
 	configPath: string
 	dryRun: boolean
 }): Promise<{ created: number; failed: number; rebuilt: number }> {
-	const dir = buildDirectoryContext({ cwd, workingDirectory })
-	const titleSuffix = workingDirectory === '.' ? '' : ` in /${workingDirectory}`
+	const dir = buildDirectoryContext({ cwd, dir: location.dir })
+	const provider = getProvider({ id: location.providerId })
+	const catalogName = location.definition.catalogName
 
 	// 1. Load config
 	const config = await loadConfigForDirectory({ dir, configPath })
 
-	// 2. Parse catalog
-	console.log('  Parsing catalog...')
-	const packageJson: PackageJson = await Bun.file(dir.packageJsonPath).json()
-	const catalog = readStringRecord(packageJson.catalog)
+	// Named catalogs get their own branch segment; the default catalog keeps
+	// the historical branch layout.
+	const prefixSegments = [config.branchPrefix]
+	const titleParts: Array<string> = []
+	if (location.dir !== '.') {
+		prefixSegments.push(location.dir)
+		titleParts.push(`in /${location.dir}`)
+	}
+	if (catalogName !== 'default') {
+		prefixSegments.push(catalogName)
+		titleParts.push(`catalog ${catalogName}`)
+	}
+	const effectiveBranchPrefix = prefixSegments.filter(Boolean).join('/')
+	const titleSuffix = titleParts.length > 0 ? ` (${titleParts.join(', ')})` : ''
 
-	if (!catalog) {
-		console.error('  No catalog found in package.json')
+	// 2. Re-read the catalog definition (discovery may have run before a fetch)
+	console.log('  Parsing catalog...')
+	let definition: ParsedCatalog | undefined
+	try {
+		const content = await Bun.file(
+			`${dir.workDir}/${location.definitionRelPath}`
+		).text()
+		definition = provider
+			.parseDefinitions({ content })
+			.find((d) => d.catalogName === catalogName)
+	} catch (error: unknown) {
+		console.warn(
+			`  Warning: could not read ${location.definitionRelPath}: ${String(error)}`
+		)
+	}
+
+	if (!definition) {
+		console.error(
+			`  No catalog "${catalogName}" found in ${location.definitionRelPath}`
+		)
 		return { created: 0, failed: 0, rebuilt: 0 }
 	}
 
-	const entries = parseCatalog({ catalog })
-	console.log(`    Found ${entries.length} catalog entries`)
+	const entries = parseCatalog({ catalog: definition.entries })
+	console.log(
+		`    Found ${entries.length} catalog entries (${provider.id}, ${location.definitionRelPath})`
+	)
 
 	// 3–4. Query registry and find updates
 	const candidates = await findCatalogCandidates({ entries, config })
@@ -641,15 +693,15 @@ async function processDirectory({
 	} = await buildGroupedUpdates({ candidates, config })
 
 	// 5b. Override pipeline
-	const effectiveBranchPrefix =
-		workingDirectory === '.'
-			? config.branchPrefix
-			: `${config.branchPrefix}/${workingDirectory}`
 	const { overrideBranchUpdate, overrideEntries } = await findOverrideUpdates({
 		dir,
 		config,
+		providerId: location.providerId,
 		entries,
-		packageJson,
+		existingOverrides: await loadExistingOverrides({
+			dir,
+			providerId: location.providerId
+		}),
 		effectiveBranchPrefix,
 		titleSuffix
 	})
@@ -675,6 +727,7 @@ async function processDirectory({
 	const { existingPrs, closedCount, rebuiltCount } = await syncDirectoryPrs({
 		dir,
 		config,
+		location,
 		groups,
 		releaseNotes,
 		titleSuffix,
@@ -687,6 +740,7 @@ async function processDirectory({
 	const { created, failed } = await createDirectoryPrs({
 		dir,
 		config,
+		location,
 		existingPrs,
 		closedCount,
 		groups,
@@ -697,6 +751,27 @@ async function processDirectory({
 	})
 
 	return { created, failed, rebuilt: rebuiltCount }
+}
+
+async function loadExistingOverrides({
+	dir,
+	providerId
+}: {
+	dir: DirectoryContext
+	providerId: CatalogLocation['providerId']
+}): Promise<Record<string, string>> {
+	const audit = getProvider({ id: providerId }).audit
+	if (!audit) {
+		return {}
+	}
+	try {
+		const content = await Bun.file(
+			`${dir.workDir}/${audit.overrideFile}`
+		).text()
+		return audit.readOverrides({ content }) ?? {}
+	} catch {
+		return {}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -728,40 +803,48 @@ async function main(): Promise<void> {
 	})
 	const startBranch = startBranchResult.stdout.trim()
 
-	// 1. Discover catalog directories
-	console.log('\nDiscovering catalog directories...')
-	const directories = await discoverCatalogDirectories({
+	// 1. Discover catalog locations
+	console.log('\nDiscovering catalog locations...')
+	const locations = await discoverCatalogLocations({
 		cwd,
 		excludePatterns: excludeDirectories
 	})
 
-	if (directories.length === 0) {
-		console.log('No directories with a catalog found.')
+	if (locations.length === 0) {
+		console.log('No catalog definitions found.')
 		return
 	}
 
 	console.log(
-		`Found ${directories.length} catalog ${directories.length === 1 ? 'directory' : 'directories'}: ${directories.map((d) => (d === '.' ? '.' : `/${d}`)).join(', ')}`
+		`Found ${locations.length} catalog ${locations.length === 1 ? 'definition' : 'definitions'}: ${locations
+			.map(
+				(l) =>
+					`${l.dir === '.' ? '.' : `/${l.dir}`} (${l.providerId}${l.definition.catalogName === 'default' ? '' : `:${l.definition.catalogName}`})`
+			)
+			.join(', ')}`
 	)
 
-	// 2. Process each directory
+	// 2. Process each location
 	let totalCreated = 0
 	let totalFailed = 0
 	let totalRebuilt = 0
 
-	// Directories are processed one at a time on purpose: each one checks out
+	// Locations are processed one at a time on purpose: each one checks out
 	// branches and runs installs in the shared working tree, so running them
 	// concurrently would race the same files.
 	/* oxlint-disable no-await-in-loop */
-	for (const dir of directories) {
-		const label = dir === '.' ? '(root)' : `/${dir}`
+	for (const location of locations) {
+		const label =
+			location.dir === '.'
+				? `(root, ${location.providerId})`
+				: `/${location.dir} (${location.providerId})`
 		console.log(`\n${'='.repeat(60)}`)
 		console.log(`Processing ${label}`)
 		console.log('='.repeat(60))
 
 		try {
-			const result = await processDirectory({
-				workingDirectory: dir,
+			const result = await processCatalog({
+				location,
 				cwd,
 				configPath,
 				dryRun
@@ -773,7 +856,7 @@ async function main(): Promise<void> {
 			console.error(`  Failed to process ${label}: ${String(error)}`)
 			totalFailed++
 			// Best-effort recovery: return to a clean default branch state so
-			// subsequent directories aren't processed from a stale branch.
+			// subsequent locations aren't processed from a stale branch.
 			await exec({ command: ['git', 'checkout', '--', '.'], cwd })
 			await exec({ command: ['git', 'checkout', startBranch], cwd })
 		}
@@ -792,7 +875,7 @@ async function main(): Promise<void> {
 		const total = totalCreated + totalFailed
 		console.log(`\n${'='.repeat(60)}`)
 		console.log(
-			`Summary: Created ${totalCreated}/${total} PRs, rebuilt ${totalRebuilt} existing PRs across ${directories.length} ${directories.length === 1 ? 'directory' : 'directories'}.`
+			`Summary: Created ${totalCreated}/${total} PRs, rebuilt ${totalRebuilt} existing PRs across ${locations.length} catalog ${locations.length === 1 ? 'definition' : 'definitions'}.`
 		)
 	}
 

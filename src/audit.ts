@@ -1,13 +1,16 @@
-import { z } from 'zod'
+import { type AuditCapability, getProvider, type ProviderId } from './providers'
 import {
 	type AuditResult,
 	type BranchUpdate,
 	type OverrideEntry,
 	type Severity
 } from './types'
-import { compareSemver, getOverrideBranchPrefix, PR_FOOTER } from './utils'
-import { readStringRecord, severitySchema, type PackageJson } from './schemas'
-
+import {
+	compareSemver,
+	getOverrideBranchPrefix,
+	PR_FOOTER,
+	overrideKey
+} from './utils'
 // ---------------------------------------------------------------------------
 // Severity ordering
 // ---------------------------------------------------------------------------
@@ -20,40 +23,36 @@ const SEVERITY_ORDER = {
 	critical: 4
 } satisfies Record<Severity, number>
 
-/** Validate a `bun audit --json` advisory entry before trusting its fields. */
-const auditAdvisorySchema = z.object({
-	id: z.number(),
-	url: z.string(),
-	title: z.string(),
-	severity: severitySchema,
-	vulnerable_versions: z.string(),
-	cwe: z.array(z.string()),
-	cvss: z.object({ score: z.number(), vectorString: z.string() })
-})
-
-const auditResultSchema = z.record(z.string(), z.array(auditAdvisorySchema))
-
 // ---------------------------------------------------------------------------
-// Run bun audit
+// Run audit
 // ---------------------------------------------------------------------------
 
 /**
- * Runs `bun audit --json` and returns parsed results.
- * Uses Bun.spawn directly instead of the exec helper because bun audit
- * returns a non-zero exit code when vulnerabilities are found, which is
+ * Runs the provider's audit command and returns parsed results, or null when
+ * the audit could not be executed/parsed. An empty (clean) result is valid.
+ * Uses Bun.spawn directly instead of the exec helper because audit tools
+ * return a non-zero exit code when vulnerabilities are found, which is
  * the expected (successful) case — exec would log misleading errors.
  */
 export async function runAudit({
-	cwd
+	cwd,
+	audit
 }: {
 	cwd: string
+	audit: AuditCapability
 }): Promise<AuditResult | null> {
-	const proc = Bun.spawn(['bun', 'audit', '--json'], {
-		cwd,
-		stdout: 'pipe',
-		stderr: 'pipe',
-		env: process.env
-	})
+	let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'>
+	try {
+		proc = Bun.spawn(audit.command, {
+			cwd,
+			stdout: 'pipe',
+			stderr: 'pipe',
+			env: process.env
+		})
+	} catch (error: unknown) {
+		console.warn(`  Failed to run ${audit.command.join(' ')}: ${String(error)}`)
+		return null
+	}
 
 	const [stdout, stderr] = await Promise.all([
 		new Response(proc.stdout).text(),
@@ -61,23 +60,19 @@ export async function runAudit({
 	])
 	await proc.exited
 
+	const toolName = audit.command[0]
 	const output = (stdout || stderr).trim()
 	if (!output) {
-		console.warn('  bun audit returned empty output')
-		return null
+		// Clean audits may legitimately print nothing (e.g. yarn NDJSON).
+		return {}
 	}
 
-	try {
-		const parsed = auditResultSchema.safeParse(JSON.parse(output))
-		if (!parsed.success) {
-			console.warn('  bun audit returned unexpected JSON format')
-			return null
-		}
-		return parsed.data
-	} catch {
-		console.warn('  Failed to parse bun audit output')
+	const parsed = audit.parseOutput({ output })
+	if (parsed === null) {
+		console.warn(`  ${toolName} audit returned unexpected output format`)
 		return null
 	}
+	return parsed
 }
 
 // ---------------------------------------------------------------------------
@@ -126,40 +121,63 @@ export function parseFixedVersion({
 }
 
 // ---------------------------------------------------------------------------
-// Override key helper
-// ---------------------------------------------------------------------------
-
-export function overrideKey(
-	entry: Pick<OverrideEntry, 'packageName' | 'vulnerableRange'>
-): string {
-	return `${entry.packageName}@${entry.vulnerableRange}`
-}
-
-/**
- * Returns true if the key matches the tool-generated format `name@<range>`.
- * User-added overrides use plain package names (e.g. `some-package`), while
- * tool-generated keys always contain `@` followed by a semver comparator.
- * Note: a user override manually written as `pkg@<range>` would be treated
- * as tool-generated and subject to cleanup.
- */
-export function isToolOverrideKey(key: string): boolean {
-	return /^.+@[<>=]/.test(key)
-}
-
-// ---------------------------------------------------------------------------
 // Compute overrides from audit results
 // ---------------------------------------------------------------------------
+
+/**
+ * The desired override map: user-added overrides preserved, stale
+ * tool-managed entries dropped, and one entry per (package, vulnerable
+ * range) group pointing at the highest fixed version. Collisions (possible
+ * when the provider keys overrides by package name alone) keep the highest
+ * fixed version.
+ */
+export function computeOverrideMap({
+	existing,
+	overrides,
+	keyOf,
+	isManagedOverride
+}: {
+	existing: Record<string, string>
+	overrides: Array<OverrideEntry>
+	keyOf: AuditCapability['overrideKey']
+	isManagedOverride: AuditCapability['isManagedOverride']
+}) {
+	const result: Record<string, string> = {}
+
+	// Preserve user-added overrides (not tool-managed)
+	for (const [key, value] of Object.entries(existing)) {
+		if (!isManagedOverride(key, value)) {
+			result[key] = value
+		}
+	}
+
+	// Add currently needed tool overrides
+	for (const entry of overrides) {
+		const key = keyOf(entry)
+		const current = result[key]
+		if (
+			current === undefined ||
+			compareSemver({ a: entry.fixedVersion, b: current }) > 0
+		) {
+			result[key] = entry.fixedVersion
+		}
+	}
+
+	return { ...result }
+}
 
 export function computeOverrides({
 	auditResult,
 	catalogNames,
 	minimumSeverity,
-	existingOverrides
+	existingOverrides,
+	keyOf
 }: {
 	auditResult: AuditResult
 	catalogNames: Set<string>
 	minimumSeverity: Severity
 	existingOverrides: Record<string, string>
+	keyOf: AuditCapability['overrideKey']
 }): Array<OverrideEntry> {
 	const minLevel = SEVERITY_ORDER[minimumSeverity]
 
@@ -209,14 +227,14 @@ export function computeOverrides({
 	const entries: Array<OverrideEntry> = []
 
 	for (const group of groupMap.values()) {
-		const existingVersion = existingOverrides[overrideKey(group)]
+		const existingVersion = existingOverrides[keyOf(group)]
 		if (
 			existingVersion &&
 			compareSemver({ a: existingVersion, b: group.fixedVersion }) >= 0
 		) {
-			// The override exists in package.json but bun audit still reports the
-			// vulnerability — the lockfile wasn't re-resolved after the override was
-			// added.  Include it so the PR branch can delete the lockfile and reinstall.
+			// The override exists but the audit still reports the vulnerability —
+			// the lockfile wasn't re-resolved after the override was added.
+			// Include it so the PR branch can delete the lockfile and reinstall.
 			group.existingOverrideStale = true
 		}
 
@@ -266,10 +284,10 @@ export function buildOverridePrBody({
 		for (const advisory of override.advisories) {
 			lines.push(
 				`### ${advisory.title}`,
-				`- **Severity**: ${advisory.severity} (CVSS ${advisory.cvss.score})`,
+				`- **Severity**: ${advisory.severity}${advisory.cvss ? ` (CVSS ${advisory.cvss.score})` : ''}`,
 				`- **Vulnerable versions**: \`${advisory.vulnerable_versions}\``
 			)
-			if (advisory.cwe.length > 0) {
+			if (advisory.cwe && advisory.cwe.length > 0) {
 				lines.push(`- **CWE**: ${advisory.cwe.join(', ')}`)
 			}
 			lines.push(`- **Advisory**: ${advisory.url}`, '')
@@ -278,8 +296,7 @@ export function buildOverridePrBody({
 	}
 
 	lines.push(
-		`> Override entries are added to \`package.json#overrides\` to pin transitive dependencies to patched versions.`,
-		`> See [Bun overrides documentation](https://bun.sh/docs/install/overrides) for details.`,
+		`> Override entries pin vulnerable transitive dependencies to patched versions.`,
 		'',
 		'---',
 		PR_FOOTER
@@ -295,43 +312,45 @@ export function buildOverridePrBody({
 export function buildOverrideBranchUpdate({
 	overrides,
 	branchPrefix,
-	titleSuffix = ''
+	titleSuffix = '',
+	workDir,
+	providerId
 }: {
 	overrides: Array<OverrideEntry>
 	branchPrefix: string
 	titleSuffix?: string
+	workDir: string
+	providerId: ProviderId
 }): BranchUpdate {
 	const n = overrides.length
 	const title = `fix(security): override ${n} vulnerable transitive ${n === 1 ? 'dependency' : 'dependencies'}${titleSuffix}`
 	const body = buildOverridePrBody({ overrides })
 	const branch = `${getOverrideBranchPrefix({ branchPrefix })}/vulnerability-fixes`
+	const provider = getProvider({ id: providerId })
+	const audit = provider.audit
+	if (!audit) {
+		throw new Error(`Provider "${providerId}" does not support audit overrides`)
+	}
+	const overridePath = `${workDir}/${audit.overrideFile}`
 
 	return {
 		branch,
 		title,
 		body,
-		deleteLockfile: true,
-		applyChanges: (packageJson) => {
-			const current = readStringRecord(packageJson.overrides) ?? {}
-			const result: Record<string, string> = {}
-
-			// Preserve user-added overrides (non-tool keys)
-			for (const [key, value] of Object.entries(current)) {
-				if (!isToolOverrideKey(key)) {
-					result[key] = value
-				}
-			}
-
-			// Add currently needed tool overrides
-			for (const entry of overrides) {
-				result[overrideKey(entry)] = entry.fixedVersion
-			}
-
-			if (Object.keys(result).length > 0) {
-				packageJson.overrides = result
-			} else {
-				delete packageJson.overrides
-			}
+		affectedFiles: [audit.overrideFile],
+		deleteLockfiles: [provider.lockfileName],
+		installCommand: provider.installCommand,
+		apply: async () => {
+			const content = await Bun.file(overridePath).text()
+			const existing = audit.readOverrides({ content }) ?? {}
+			const map = computeOverrideMap({
+				existing,
+				overrides,
+				keyOf: (entry) => audit.overrideKey(entry),
+				isManagedOverride: (key, value) => audit.isManagedOverride(key, value)
+			})
+			const updated = audit.writeOverrides({ content, map })
+			await Bun.write(overridePath, updated)
 		}
 	}
 }
@@ -341,28 +360,38 @@ export function buildOverrideBranchUpdate({
 // ---------------------------------------------------------------------------
 
 export function isOverrideBranchOutdated({
-	branchPackageJson,
+	branchFiles,
+	audit,
 	expectedOverrides
 }: {
-	branchPackageJson: PackageJson
+	/** Content of each affected file on the branch (null when absent) */
+	branchFiles: Map<string, string | null>
+	audit: AuditCapability
 	expectedOverrides: Array<OverrideEntry>
 }): boolean {
-	const overrides = readStringRecord(branchPackageJson.overrides)
+	const content = branchFiles.get(audit.overrideFile)
+	if (content === null || content === undefined) {
+		return expectedOverrides.length > 0
+	}
+
+	const overrides = audit.readOverrides({ content })
 	if (!overrides) {
 		return expectedOverrides.length > 0
 	}
 
 	// Check all expected overrides are present with correct versions
 	for (const entry of expectedOverrides) {
-		if (overrides[overrideKey(entry)] !== entry.fixedVersion) {
+		if (overrides[audit.overrideKey(entry)] !== entry.fixedVersion) {
 			return true
 		}
 	}
 
 	// Check for stale tool-generated overrides that are no longer needed
-	const expectedKeys = new Set(expectedOverrides.map((e) => overrideKey(e)))
-	for (const key of Object.keys(overrides)) {
-		if (isToolOverrideKey(key) && !expectedKeys.has(key)) {
+	const expectedKeys = new Set(
+		expectedOverrides.map((e) => audit.overrideKey(e))
+	)
+	for (const [key, value] of Object.entries(overrides)) {
+		if (audit.isManagedOverride(key, value) && !expectedKeys.has(key)) {
 			return true
 		}
 	}

@@ -1,6 +1,5 @@
-import { type CatalogEntry } from './types'
+import { type CatalogEntry, type UpdateCandidate } from './types'
 import { parseSemver } from './utils'
-
 /** Detect the range prefix (`^`, `~`) or empty string for a pinned version. */
 function detectRangePrefix(raw: string): '^' | '~' | '' {
 	if (raw.startsWith('^')) {
@@ -60,4 +59,16 @@ export function parseCatalog({
 	}
 
 	return entries
+}
+
+/** Serialize an update candidate back into a raw catalog value. */
+export function buildCatalogValue({
+	update
+}: {
+	update: UpdateCandidate
+}): string {
+	if (update.isAlias) {
+		return `npm:${update.npmName}@${update.rangePrefix}${update.latestVersion}`
+	}
+	return `${update.rangePrefix}${update.latestVersion}`
 }

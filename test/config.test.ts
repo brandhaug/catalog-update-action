@@ -28,7 +28,6 @@ describe('loadConfig', () => {
     expect(config.defaultBranch).toBe('master')
     expect(config.maxOpenPrs).toBe(20)
     expect(config.concurrency).toBe(10)
-    expect(config.packageManager).toBe('bun')
     expect(config.minReleaseAgeDays).toBe(0)
     expect(config.groups).toEqual([])
     expect(config.ignore).toEqual([])
@@ -41,7 +40,6 @@ describe('loadConfig', () => {
       defaultBranch: 'main',
       maxOpenPrs: 10,
       concurrency: 5,
-      packageManager: 'pnpm',
       groups: [
         { name: 'react', patterns: ['react', 'react-dom'] },
         { name: 'patches', patterns: ['*'], updateTypes: ['patch'] }
@@ -57,7 +55,6 @@ describe('loadConfig', () => {
     expect(config.defaultBranch).toBe('main')
     expect(config.maxOpenPrs).toBe(10)
     expect(config.concurrency).toBe(5)
-    expect(config.packageManager).toBe('pnpm')
     expect(config.groups).toHaveLength(2)
     expect(config.groups[0]).toEqual({ name: 'react', patterns: ['react', 'react-dom'], updateTypes: null })
     expect(config.groups[1]).toEqual({ name: 'patches', patterns: ['*'], updateTypes: ['patch'] })
@@ -78,14 +75,26 @@ describe('loadConfig', () => {
     expect(config.groups).toEqual([])
   })
 
-  test('rejects invalid packageManager', async () => {
+  test('warns about deprecated packageManager option but keeps loading', async () => {
     const configPath = await writeTempConfig(JSON.stringify({
-      packageManager: 'deno'
+      packageManager: 'pnpm',
+      defaultBranch: 'main'
     }))
 
-    const config = await loadConfig({ configPath })
+    const warnings: Array<string> = []
+    const originalWarn = console.warn
+    console.warn = (message: string) => {
+      warnings.push(message)
+    }
 
-    expect(config.packageManager).toBe('bun')
+    try {
+      const config = await loadConfig({ configPath })
+      expect(config.defaultBranch).toBe('main')
+    } finally {
+      console.warn = originalWarn
+    }
+
+    expect(warnings.some((w) => w.includes('packageManager'))).toBe(true)
   })
 
   test('filters invalid updateTypes', async () => {

@@ -37,7 +37,7 @@ const stringRecordSchema = z.record(z.string(), z.string())
  * maps), returning undefined when the field is missing or not a string record.
  */
 export function readStringRecord(
-	value: JsonValue
+	value: JsonValue | undefined
 ): Record<string, string> | undefined {
 	const parsed = stringRecordSchema.safeParse(value)
 	return parsed.success ? parsed.data : undefined
