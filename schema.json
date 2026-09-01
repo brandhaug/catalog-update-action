@@ -31,12 +31,6 @@
       "minimum": 1,
       "description": "Max concurrent npm registry requests"
     },
-    "packageManager": {
-      "type": "string",
-      "enum": ["bun", "npm", "pnpm", "yarn"],
-      "default": "bun",
-      "description": "Package manager used for lockfile updates"
-    },
     "minReleaseAgeDays": {
       "type": "integer",
       "default": 0,
@@ -102,7 +96,7 @@
     "audit": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Configuration for transitive dependency vulnerability overrides via bun audit",
+      "description": "Configuration for transitive dependency vulnerability overrides via the package manager's audit (bun audit / pnpm audit / yarn npm audit).",
       "properties": {
         "enabled": {
           "type": "boolean",

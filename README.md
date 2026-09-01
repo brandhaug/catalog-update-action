@@ -1,24 +1,35 @@
 # catalog-update-action
 
-Automated dependency updates for Bun's `catalog:` protocol. Replaces Dependabot for monorepos using [Bun workspaces](https://bun.sh/docs/install/workspaces) with a centralized [catalog](https://bun.sh/docs/install/workspaces#versioning).
+Automated dependency updates for the `catalog:` protocol. Replaces Dependabot for monorepos that centralize dependency versions in a catalog — [Bun](https://bun.com/docs/pm/catalogs), [pnpm](https://pnpm.io/catalogs), and [Yarn](https://yarnpkg.com/features/catalogs) are all supported.
 
 [![npm version](https://img.shields.io/npm/v/catalog-update-action)](https://www.npmjs.com/package/catalog-update-action)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## Why
 
-Dependabot doesn't understand Bun's `catalog:` protocol, so it can't update the centralized version catalog in your root `package.json`. This action fills that gap.
+Dependabot doesn't understand the `catalog:` protocol, so it can't update the centralized version catalog in your monorepo. This action fills that gap.
 
-- Reads the `catalog` field from each discovered `package.json` (auto-discovers catalogs in monorepos; supports `^` ranges and `npm:` aliases)
+- Reads catalog definitions from `package.json` (`catalog`/`catalogs`, Bun), `pnpm-workspace.yaml` (pnpm), or `.yarnrc.yml` (Yarn) — auto-discovered, including named catalogs
 - Queries npm for the latest stable versions and groups updates into configurable batches
 - Creates and syncs PRs via the GitHub CLI — closes stale ones, rebuilds conflicting ones, and includes GitHub Releases notes
-- Detects vulnerable transitive dependencies via `bun audit` and creates override PRs
+- Detects vulnerable transitive dependencies via the package manager's audit and creates override PRs (bun/pnpm → `overrides`, yarn → `resolutions`)
 - Optionally enforces a minimum release age (supply chain protection) and turns on GitHub auto-merge
 - Runs as a GitHub Action or a standalone CLI
 
+## Supported package managers
+
+| Manager | Catalog definition | Default catalog | Named catalogs | Install | Vulnerability audit |
+| --- | --- | --- | --- | --- | --- |
+| Bun | `package.json` → `catalog` / `catalogs` | ✓ | ✓ | `bun install` | ✓ (`bun audit`) |
+| pnpm | `pnpm-workspace.yaml` → `catalog` / `catalogs` | ✓ | ✓ | `pnpm install` | ✓ (`pnpm audit`) |
+| Yarn (Berry 4+) | `.yarnrc.yml` → `catalog` / `catalogs` | ✓ | ✓ | `yarn install` | ✓ (`yarn npm audit`) |
+
+The package manager is detected from the definition file that declares the catalog — there is no `packageManager` config option (it was removed; existing configs that set it are ignored with a warning).
+
 ## Prerequisites
 
-- [Bun](https://bun.sh) runtime
+- [Bun](https://bun.sh) runtime (used to run this action; Bun catalogs also use it to install)
+- The package manager matching your catalogs (`pnpm` / `yarn`) available on the runner for non-Bun catalogs
 - `gh` CLI (pre-installed on GitHub Actions runners)
 - A GitHub token with `contents: write` and `pull-requests: write` permissions
 
@@ -37,7 +48,11 @@ on:
       - master
     paths:
       - '**/package.json'
+      - '**/pnpm-workspace.yaml'
+      - '**/.yarnrc.yml'
       - '**/bun.lock'
+      - '**/pnpm-lock.yaml'
+      - '**/yarn.lock'
   workflow_dispatch:
 
 # Rebuilds of open update PRs must run one at a time; queued (not cancelled)
@@ -122,7 +137,6 @@ Create a `.catalog-updaterc.json` in your repository root:
   "defaultBranch": "master",
   "maxOpenPrs": 20,
   "concurrency": 10,
-  "packageManager": "bun",
   "minReleaseAgeDays": 3,
   "groups": [
     { "name": "react", "patterns": ["react", "react-dom"] },
@@ -150,11 +164,10 @@ Create a `.catalog-updaterc.json` in your repository root:
 | `defaultBranch` | `string` | `"master"` | Base branch for PRs |
 | `maxOpenPrs` | `number` | `20` | Maximum number of open PRs at any time |
 | `concurrency` | `number` | `10` | Max concurrent npm registry requests |
-| `packageManager` | `string` | `"bun"` | Package manager for lockfile updates (`bun`, `npm`, `pnpm`, `yarn`) |
 | `minReleaseAgeDays` | `number` | `0` | Minimum days a release must be published before creating a PR (supply chain protection). `0` = disabled. Does not apply to audit overrides |
 | `groups` | `array` | `[]` | Dependency grouping rules |
 | `ignore` | `array` | `[]` | Dependency ignore rules |
-| `audit` | `object` | `{}` | Transitive vulnerability audit settings |
+| `audit` | `object` | `{}` | Transitive vulnerability audit settings (Bun catalogs only) |
 | `autoMerge` | `object` | `{}` | GitHub auto-merge settings |
 
 ### Groups
@@ -195,11 +208,21 @@ Require releases to be published for a minimum number of days before the action 
 
 ### Vulnerability Audit
 
-Runs `bun audit --json` to detect vulnerable transitive dependencies and creates a PR adding [`overrides`](https://bun.sh/docs/install/overrides) pinning them to patched versions. Configure with `enabled` (default `true`) and `minimumSeverity` (`"info"`, `"low"`, `"moderate"`, `"high"`, `"critical"`; default `"moderate"`).
+Runs the package manager's audit (`bun audit`, `pnpm audit`, or `yarn npm audit`) to detect vulnerable transitive dependencies and creates a PR pinning them to patched versions. Configure with `enabled` (default `true`) and `minimumSeverity` (`"info"`, `"low"`, `"moderate"`, `"high"`, `"critical"`; default `"moderate"`).
 
 ```json
 { "audit": { "enabled": false } }
 ```
+
+Where the pins land depends on the manager:
+
+| Manager | Override file | Key format |
+| --- | --- | --- |
+| Bun | `package.json` → `overrides` | `pkg@<vulnerable-range>: <fixed>` |
+| pnpm | `pnpm-workspace.yaml` → `overrides` | `pkg@<vulnerable-range>: <fixed>` |
+| Yarn | `package.json` → `resolutions` | `pkg: <fixed>` |
+
+Note the Yarn differences: `resolutions` selectors are keyed by package name (Yarn ignores range selectors), so multiple advisory ranges for one package collapse into the highest fixed version. Entries are treated as tool-managed when their value is an exact semver version (the format this action writes); range-valued entries are always treated as user-owned and preserved — but that also means stale exact pins for packages that are no longer vulnerable get cleaned up on the next run. Keep user resolutions range-valued if you want them left alone.
 
 Override PRs are created with security priority (before catalog PRs), share the `maxOpenPrs` budget, and exclude direct catalog dependencies (handled by the catalog pipeline).
 
@@ -217,14 +240,14 @@ Two repository settings are required: **Allow auto-merge** under Settings > Gene
 
 ## How It Works
 
-1. **Discover** directories containing a `package.json` with a `catalog` field
+1. **Discover** catalog definitions — `package.json` with a `catalog` field (Bun), `pnpm-workspace.yaml` (pnpm), `.yarnrc.yml` (Yarn) — including named catalogs
 2. **Query** npm for the latest stable versions, applying ignore rules, semver classification, and minimum release age
 3. **Group** updates into batches (unmatched packages get individual PRs)
-4. **Audit** vulnerable transitive dependencies via `bun audit` if enabled
+4. **Audit** vulnerable transitive dependencies and open override PRs (bun/pnpm → `overrides`, yarn → `resolutions`)
 5. **Sync** existing PRs — close stale ones, rebuild conflicting ones
 6. **Create** new PRs (override PRs first for security priority), respecting `maxOpenPrs`
 
-Each catalog PR includes a table of updated packages with version changes and GitHub Releases notes. Each override PR includes a summary table and collapsible advisory details.
+Each catalog location (a directory + definition file + catalog name) is processed independently, with its own branch namespace: `catalog-update/<directory>/<catalog-name>/<group>` for non-default catalogs. Each catalog PR includes a table of updated packages with version changes and GitHub Releases notes. Each override PR includes a summary table and collapsible advisory details. Edits to YAML definition files preserve comments and formatting.
 
 ## Contributing
 

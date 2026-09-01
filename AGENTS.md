@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-GitHub Action + CLI (`catalog-update`) that automates dependency updates for Bun's `catalog:` protocol in monorepos. Queries npm for latest versions, groups updates into batches, creates/syncs PRs via GitHub CLI, and detects vulnerable transitive dependencies via `bun audit`. Replaces Dependabot for Bun workspace catalogs.
+GitHub Action + CLI (`catalog-update`) that automates dependency updates for the `catalog:` protocol in monorepos — supports Bun, pnpm, and Yarn catalogs. Queries npm for latest versions, groups updates into batches, creates/syncs PRs via GitHub CLI, and detects vulnerable transitive dependencies via each manager's audit (`bun audit`, `pnpm audit`, `yarn npm audit`). Replaces Dependabot for catalog-based workspaces.
 
 Runs directly from `src/` via Bun — no build step. Published to npm as `catalog-update-action`; requires **Bun >= 1.4.0**. The action is dogfooded by this repo's own `.github/workflows/catalog-update.yml` (`uses: ./`, daily schedule).
 
@@ -28,6 +28,7 @@ oxlint (type-aware) + oxfmt, configured in `.oxlintrc.json` / `.oxfmtrc.json`. F
 
 ```
 src/                       # TypeScript source (entry: main.ts)
+src/providers/             # Per-manager catalog adapters (bun, pnpm, yarn) — parsing, install, audit capability
 test/                      # bun:test tests, mirror src/ names (src/catalog.ts -> test/catalog.test.ts)
 action.yml                 # GitHub Action definition (composite; inputs: config, dry-run, token, exclude-directories, bun-version)
 schema.json                # JSON Schema for .catalog-updaterc.json

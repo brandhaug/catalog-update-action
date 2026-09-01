@@ -1,6 +1,23 @@
-import { describe, expect, test } from 'bun:test'
-import { buildCatalogValue, buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits } from '../src/git'
-import { type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
+import { describe, expect, test, afterAll } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits } from '../src/git'
+import { type CatalogLocation, type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
+
+const [bunTestDir, missingTestDir, pnpmTestDir] = [
+  'git-test-bun-',
+  'git-test-missing-',
+  'git-test-pnpm-'
+].map((prefix) => mkdtempSync(join(tmpdir(), prefix)))
+
+const TEST_DIRS = [bunTestDir, missingTestDir, pnpmTestDir]
+
+afterAll(() => {
+  for (const dir of TEST_DIRS) {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
   return {
@@ -19,7 +36,6 @@ const baseConfig: Config = {
   defaultBranch: 'master',
   maxOpenPrs: 20,
   concurrency: 10,
-  packageManager: 'bun',
   minReleaseAgeDays: 0,
   groups: [],
   ignore: [],
@@ -27,57 +43,12 @@ const baseConfig: Config = {
   autoMerge: { enabled: false, mergeMethod: 'squash' }
 }
 
-// ---------------------------------------------------------------------------
-// buildCatalogValue
-// ---------------------------------------------------------------------------
-
-describe('buildCatalogValue', () => {
-  test('returns plain version for non-caret, non-alias', () => {
-    const result = buildCatalogValue({
-      update: makeCandidate({ name: 'react', latestVersion: '19.1.0' })
-    })
-    expect(result).toBe('19.1.0')
-  })
-
-  test('returns caret version', () => {
-    const result = buildCatalogValue({
-      update: makeCandidate({ name: 'react', latestVersion: '19.1.0', rangePrefix: "^" })
-    })
-    expect(result).toBe('^19.1.0')
-  })
-
-  test('returns tilde version', () => {
-    const result = buildCatalogValue({
-      update: makeCandidate({ name: 'lodash', latestVersion: '4.18.0', rangePrefix: "~" })
-    })
-    expect(result).toBe('~4.18.0')
-  })
-
-  test('returns npm: alias format', () => {
-    const result = buildCatalogValue({
-      update: makeCandidate({
-        name: 'vite',
-        latestVersion: '7.4.0',
-        isAlias: true,
-        npmName: 'rolldown-vite'
-      })
-    })
-    expect(result).toBe('npm:rolldown-vite@7.4.0')
-  })
-
-  test('returns npm: alias format with caret', () => {
-    const result = buildCatalogValue({
-      update: makeCandidate({
-        name: 'vite',
-        latestVersion: '7.4.0',
-        isAlias: true,
-        npmName: 'rolldown-vite',
-        rangePrefix: "^"
-      })
-    })
-    expect(result).toBe('npm:rolldown-vite@^7.4.0')
-  })
-})
+const bunRootLocation: CatalogLocation = {
+  dir: '.',
+  providerId: 'bun',
+  definitionRelPath: 'package.json',
+  definition: { catalogName: 'default', entries: { react: '18.0.0', zod: '3.0.0' } }
+}
 
 // ---------------------------------------------------------------------------
 // buildCatalogPrBody
@@ -139,6 +110,8 @@ describe('buildCatalogBranchUpdate', () => {
       groupName: 'react',
       updates,
       config: baseConfig,
+      location: bunRootLocation,
+      workDir: '/tmp/work',
       releaseNotes: new Map()
     })
 
@@ -156,6 +129,8 @@ describe('buildCatalogBranchUpdate', () => {
       groupName: 'react-group',
       updates,
       config: baseConfig,
+      location: bunRootLocation,
+      workDir: '/tmp/work',
       releaseNotes: new Map()
     })
 
@@ -163,32 +138,67 @@ describe('buildCatalogBranchUpdate', () => {
     expect(result.title).toBe('chore(deps): bump react-group dependencies')
   })
 
-  test('applyChanges mutates catalog correctly', () => {
+  test('uses the provider install command and definition file', () => {
     const updates = [makeCandidate({ name: 'react', latestVersion: '19.0.0' })]
     const result = buildCatalogBranchUpdate({
       groupName: 'react',
       updates,
       config: baseConfig,
+      location: bunRootLocation,
+      workDir: '/tmp/work',
       releaseNotes: new Map()
     })
 
-    const pkg = { catalog: { react: '18.0.0', zod: '3.0.0' } }
-    result.applyChanges(pkg)
-
-    expect(pkg.catalog).toEqual({ react: '19.0.0', zod: '3.0.0' })
+    expect(result.affectedFiles).toEqual(['package.json'])
+    expect(result.expectedBasenames).toEqual(['package.json', 'bun.lock', 'bun.lockb'])
+    expect(result.installCommand).toEqual(['bun', 'install'])
   })
 
-  test('applyChanges throws when catalog missing', () => {
+  test('apply writes updated catalog to package.json on disk', async () => {
+    const workDir = bunTestDir
+    await Bun.write(
+      `${workDir}/package.json`,
+      JSON.stringify({ name: 'root', catalog: { react: '18.0.0', zod: '3.0.0' } }, null, 2)
+    )
+
     const updates = [makeCandidate({ name: 'react', latestVersion: '19.0.0' })]
     const result = buildCatalogBranchUpdate({
       groupName: 'react',
       updates,
       config: baseConfig,
+      location: bunRootLocation,
+      workDir,
       releaseNotes: new Map()
     })
 
-    const pkg = {}
-    expect(() => result.applyChanges(pkg)).toThrow('No valid catalog found')
+    await result.apply()
+
+    const pkg = await Bun.file(`${workDir}/package.json`).json()
+    expect(pkg.catalog).toEqual({ react: '19.0.0', zod: '3.0.0' })
+    expect(pkg.name).toBe('root')
+  })
+
+  test('apply throws when the catalog is missing', async () => {
+    const workDir = missingTestDir
+    await Bun.write(`${workDir}/package.json`, JSON.stringify({ name: 'root' }))
+
+    const updates = [makeCandidate({ name: 'react', latestVersion: '19.0.0' })]
+    const result = buildCatalogBranchUpdate({
+      groupName: 'react',
+      updates,
+      config: baseConfig,
+      location: bunRootLocation,
+      workDir,
+      releaseNotes: new Map()
+    })
+
+    let applyError: unknown
+    try {
+      await result.apply()
+    } catch (error: unknown) {
+      applyError = error
+    }
+    expect(String(applyError)).toContain('No catalog "default" found')
   })
 
   test('appends titleSuffix for single package in working directory', () => {
@@ -197,13 +207,15 @@ describe('buildCatalogBranchUpdate', () => {
       groupName: 'react',
       updates,
       config: baseConfig,
-      titleSuffix: ' in /apps/frontend',
+      location: { ...bunRootLocation, dir: 'apps/frontend' },
+      workDir: '/tmp/work/apps/frontend',
+      titleSuffix: ' (in /apps/frontend)',
       branchPrefix: 'catalog-update/apps/frontend',
       releaseNotes: new Map()
     })
 
     expect(result.branch).toBe('catalog-update/apps/frontend/react')
-    expect(result.title).toBe('chore(deps): bump react from 18.0.0 to 19.0.0 in /apps/frontend')
+    expect(result.title).toBe('chore(deps): bump react from 18.0.0 to 19.0.0 (in /apps/frontend)')
   })
 
   test('appends titleSuffix for group in working directory', () => {
@@ -215,13 +227,15 @@ describe('buildCatalogBranchUpdate', () => {
       groupName: 'react-group',
       updates,
       config: baseConfig,
-      titleSuffix: ' in /mito',
+      location: { ...bunRootLocation, dir: 'mito' },
+      workDir: '/tmp/work/mito',
+      titleSuffix: ' (in /mito)',
       branchPrefix: 'catalog-update/mito',
       releaseNotes: new Map()
     })
 
     expect(result.branch).toBe('catalog-update/mito/react-group')
-    expect(result.title).toBe('chore(deps): bump react-group dependencies in /mito')
+    expect(result.title).toBe('chore(deps): bump react-group dependencies (in /mito)')
   })
 
   test('uses config.branchPrefix when branchPrefix not provided', () => {
@@ -230,11 +244,47 @@ describe('buildCatalogBranchUpdate', () => {
       groupName: 'react',
       updates,
       config: baseConfig,
+      location: bunRootLocation,
+      workDir: '/tmp/work',
       releaseNotes: new Map()
     })
 
     expect(result.branch).toBe('catalog-update/react')
     expect(result.title).toBe('chore(deps): bump react from 18.0.0 to 19.0.0')
+  })
+
+  test('pnpm location writes to pnpm-workspace.yaml', async () => {
+    const workDir = pnpmTestDir
+    await Bun.write(
+      `${workDir}/pnpm-workspace.yaml`,
+      'packages:\n  - packages/*\n\ncatalog:\n  react: ^18.0.0\n'
+    )
+
+    const updates = [
+      makeCandidate({ name: 'react', currentVersion: '18.0.0', latestVersion: '19.0.0', rangePrefix: '^' })
+    ]
+    const result = buildCatalogBranchUpdate({
+      groupName: 'react',
+      updates,
+      config: baseConfig,
+      location: {
+        dir: '.',
+        providerId: 'pnpm',
+        definitionRelPath: 'pnpm-workspace.yaml',
+        definition: { catalogName: 'default', entries: { react: '^18.0.0' } }
+      },
+      workDir,
+      releaseNotes: new Map()
+    })
+
+    expect(result.affectedFiles).toEqual(['pnpm-workspace.yaml'])
+    expect(result.installCommand).toEqual(['pnpm', 'install'])
+
+    await result.apply()
+
+    const content = await Bun.file(`${workDir}/pnpm-workspace.yaml`).text()
+    expect(content).toContain('react: ^19.0.0')
+    expect(content).toContain('packages:')
   })
 })
 

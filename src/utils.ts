@@ -1,4 +1,4 @@
-import { type SemverChange } from './types'
+import { type OverrideEntry, type SemverChange } from './types'
 
 // ---------------------------------------------------------------------------
 // Glob matching
@@ -243,6 +243,28 @@ export function getOverrideBranchPrefix({
 	branchPrefix: string
 }): string {
 	return `${branchPrefix}-override`
+}
+
+// ---------------------------------------------------------------------------
+// Audit override keys
+// ---------------------------------------------------------------------------
+
+/** Canonical tool key for an override entry: `name@<range>` (bun/pnpm). */
+export function overrideKey(
+	entry: Pick<OverrideEntry, 'packageName' | 'vulnerableRange'>
+): string {
+	return `${entry.packageName}@${entry.vulnerableRange}`
+}
+
+/**
+ * Returns true if the key matches the tool-generated format `name@<range>`.
+ * User-added overrides use plain package names (e.g. `some-package`), while
+ * tool-generated keys always contain `@` followed by a semver comparator.
+ * Note: a user override manually written as `pkg@<range>` would be treated
+ * as tool-generated and subject to cleanup.
+ */
+export function isToolOverrideKey(key: string): boolean {
+	return /^.+@[<>=]/.test(key)
 }
 
 // ---------------------------------------------------------------------------

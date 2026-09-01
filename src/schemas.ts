@@ -25,19 +25,19 @@ const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
 	])
 )
 
-/** A raw package.json document: an object whose values are arbitrary JSON. */
-export const packageJsonSchema = z.record(z.string(), jsonValueSchema)
-export type PackageJson = z.infer<typeof packageJsonSchema>
+/** A raw JSON object document: an object whose values are arbitrary JSON. */
+export const jsonObjectSchema = z.record(z.string(), jsonValueSchema)
+export type JsonObject = z.infer<typeof jsonObjectSchema>
 
 /** An object whose values are all strings (catalog entries, override maps). */
 const stringRecordSchema = z.record(z.string(), z.string())
 
 /**
- * Read a package.json field as a flat string map (catalog entries, override
- * maps), returning undefined when the field is missing or not a string record.
+ * Read an object field as a flat string map (catalog entries, override maps),
+ * returning undefined when the field is missing or not a string record.
  */
 export function readStringRecord(
-	value: JsonValue
+	value: JsonValue | undefined
 ): Record<string, string> | undefined {
 	const parsed = stringRecordSchema.safeParse(value)
 	return parsed.success ? parsed.data : undefined
