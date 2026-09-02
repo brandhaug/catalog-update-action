@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.0...catalog-update-action-v1.0.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **action:** install runtime dependencies before running main.ts ([#32](https://github.com/brandhaug/catalog-update-action/issues/32)) ([9af0217](https://github.com/brandhaug/catalog-update-action/commit/9af02172cbc8a58be12ec0e7ff8e0029dd3131ad))
+
 ## [1.0.0](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.12.2...catalog-update-action-v1.0.0) (2026-09-02)
 
 
