@@ -27,7 +27,7 @@ describe('getVersionAgeDays', () => {
   test('returns age in days', () => {
     const age = getVersionAgeDays({
       publishTime: '2026-03-28T12:00:00.000Z',
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
     expect(age).toBe(3)
   })
@@ -35,13 +35,13 @@ describe('getVersionAgeDays', () => {
   test('returns fractional days', () => {
     const age = getVersionAgeDays({
       publishTime: '2026-03-31T00:00:00.000Z',
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
     expect(age).toBe(0.5)
   })
 
   test('returns null for invalid date', () => {
-    const age = getVersionAgeDays({ publishTime: 'not-a-date', now: NOW })
+    const age = getVersionAgeDays({ publishTime: 'not-a-date', nowEpochMs: NOW.getTime() })
     expect(age).toBeNull()
   })
 })
@@ -53,9 +53,9 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: new Map(),
       minReleaseAgeDays: 0,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
-    expect(result).toEqual(candidates)
+    expect(result.candidates).toEqual(candidates)
   })
 
   test('keeps candidate when version is old enough', () => {
@@ -68,11 +68,11 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
-    expect(result[0]!.latestVersion).toBe('2.0.0')
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]!.latestVersion).toBe('2.0.0')
   })
 
   test('removes candidate when no version qualifies', () => {
@@ -85,10 +85,10 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(0)
+    expect(result.candidates).toHaveLength(0)
   })
 
   test('falls back to older qualifying version when latest is too young', () => {
@@ -105,12 +105,12 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
-    expect(result[0]!.latestVersion).toBe('2.0.0')
-    expect(result[0]!.changeType).toBe('major')
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]!.latestVersion).toBe('2.0.0')
+    expect(result.candidates[0]!.changeType).toBe('major')
   })
 
   test('picks the newest qualifying fallback version', () => {
@@ -128,11 +128,11 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
-    expect(result[0]!.latestVersion).toBe('1.2.0')
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]!.latestVersion).toBe('1.2.0')
   })
 
   test('allows candidate when no metadata available', () => {
@@ -142,10 +142,10 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: new Map(),
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
+    expect(result.candidates).toHaveLength(1)
   })
 
   test('allows candidate when publish time is unparseable', () => {
@@ -158,10 +158,10 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
+    expect(result.candidates).toHaveLength(1)
   })
 
   test('allows candidate when publish time is missing for the version', () => {
@@ -174,10 +174,10 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
+    expect(result.candidates).toHaveLength(1)
   })
 
   test('skips pre-release fallback versions for stable current', () => {
@@ -194,11 +194,11 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
     // 2.0.0-beta.1 should not be considered as fallback for stable current
-    expect(result).toHaveLength(0)
+    expect(result.candidates).toHaveLength(0)
   })
 
   test('considers pre-release fallback versions for pre-release current', () => {
@@ -220,11 +220,11 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
-    expect(result[0]!.latestVersion).toBe('2.0.0-rc.1')
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]!.latestVersion).toBe('2.0.0-rc.1')
   })
 
   test('handles multiple candidates independently', () => {
@@ -241,11 +241,11 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
-    expect(result[0]!.name).toBe('old-pkg')
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]!.name).toBe('old-pkg')
   })
 
   test('enforces age filter when metadata has no repo (repo: null)', () => {
@@ -262,10 +262,10 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(0)
+    expect(result.candidates).toHaveLength(0)
   })
 
   test('updates changeType when falling back to a different version', () => {
@@ -287,11 +287,11 @@ describe('filterByReleaseAge', () => {
       candidates,
       packageMetadata: metadata,
       minReleaseAgeDays: 3,
-      now: NOW
+      nowEpochMs: NOW.getTime()
     })
 
-    expect(result).toHaveLength(1)
-    expect(result[0]!.latestVersion).toBe('1.1.0')
-    expect(result[0]!.changeType).toBe('minor')
+    expect(result.candidates).toHaveLength(1)
+    expect(result.candidates[0]!.latestVersion).toBe('1.1.0')
+    expect(result.candidates[0]!.changeType).toBe('minor')
   })
 })

@@ -1,5 +1,11 @@
-import { z } from 'zod'
-import { severitySchema, jsonObjectSchema } from './schemas'
+import { Effect, FileSystem, Option, Schema } from 'effect'
+
+import {
+	parseJsonDocument,
+	readJsonObject,
+	severitySchema,
+	type JsonValue
+} from './schemas'
 import {
 	type AutoMergeConfig,
 	type AuditConfig,
@@ -31,170 +37,270 @@ const DEFAULT_CONFIG: Config = {
 	autoMerge: DEFAULT_AUTO_MERGE_CONFIG
 }
 
-const semverChangeSchema = z.enum([
+const semverChangeSchema = Schema.Literals([
 	'major',
 	'minor',
 	'patch',
 	'prerelease',
 	'release'
 ])
-const mergeMethodSchema = z.enum(['squash', 'merge', 'rebase'])
+const mergeMethodSchema = Schema.Literals(['squash', 'merge', 'rebase'])
+/** Whole, non-negative number of days. */
+const nonNegativeIntSchema = Schema.Number.check(
+	Schema.isInt(),
+	Schema.isGreaterThanOrEqualTo(0)
+)
+
+/**
+ * Decode a single JSON field, falling back to a default when the key is
+ * absent or its value does not match the schema. This mirrors the previous
+ * zod `.catch()` semantics: one bad field never invalidates the rest of the
+ * config.
+ */
+function decodeField<A>(
+	decode: (input: JsonValue) => Option.Option<A>,
+	value: JsonValue | undefined,
+	fallback: A
+): A {
+	if (value === undefined || value === null) {
+		return fallback
+	}
+	const decoded = decode(value)
+	return Option.isSome(decoded) ? decoded.value : fallback
+}
 
 /**
  * Parse an `updateTypes` value: null/undefined/non-array become null; an array
  * keeps only the members that are valid semver change types, collapsing to
  * null when none survive.
  */
-function parseUpdateTypes({
+function parseUpdateTypesField({
 	raw
 }: {
-	raw: unknown
+	raw: JsonValue | undefined
 }): Array<SemverChange> | null {
-	if (raw === null || raw === undefined) {
-		return null
-	}
 	if (!Array.isArray(raw)) {
 		return null
 	}
 
-	const valid = raw.filter(
-		(item): item is SemverChange => semverChangeSchema.safeParse(item).success
-	)
+	const valid = raw.flatMap((item) => {
+		const decoded = Schema.decodeUnknownOption(semverChangeSchema)(item)
+		return Option.isSome(decoded) ? [decoded.value] : []
+	})
 	return valid.length > 0 ? valid : null
 }
 
-/** Shared `updateTypes` field for group and ignore-rule schemas. */
-const updateTypesField = z
-	.unknown()
-	.optional()
-	.transform((raw) => parseUpdateTypes({ raw }))
+/** Keep only the string members of a raw JSON array. */
+function parseStringArray(raw: JsonValue | undefined): Array<string> {
+	if (!Array.isArray(raw)) {
+		return []
+	}
+	return raw.flatMap((item) => {
+		const decoded = Schema.decodeUnknownOption(Schema.String)(item)
+		return Option.isSome(decoded) ? [decoded.value] : []
+	})
+}
 
-const groupDefinitionSchema = z.object({
-	name: z.string(),
-	patterns: z
-		.array(z.unknown())
-		.transform((items) =>
-			items.filter((item): item is string => z.string().safeParse(item).success)
-		),
-	updateTypes: updateTypesField
-})
-
-function parseGroups({ raw }: { raw: unknown }): Array<GroupDefinition> {
+/**
+ * Parse the `groups` field: entries need a string `name`; malformed entries
+ * are dropped rather than rejecting the whole config.
+ */
+function parseGroups({
+	raw
+}: {
+	raw: JsonValue | undefined
+}): Array<GroupDefinition> {
 	if (!Array.isArray(raw)) {
 		return []
 	}
 
 	return raw.flatMap((item) => {
-		const parsed = groupDefinitionSchema.safeParse(item)
-		return parsed.success ? [parsed.data] : []
+		const object = readJsonObject(item)
+		if (!object) {
+			return []
+		}
+		const name = Schema.decodeUnknownOption(Schema.String)(object.name)
+		// `patterns` is required: an entry without it is malformed, not
+		// merely empty (matching the previous zod schema).
+		if (Option.isNone(name) || !Array.isArray(object.patterns)) {
+			return []
+		}
+		return [
+			{
+				name: name.value,
+				patterns: parseStringArray(object.patterns),
+				updateTypes: parseUpdateTypesField({ raw: object.updateTypes })
+			}
+		]
 	})
 }
 
-const auditConfigSchema = z.object({
-	enabled: z.boolean().catch(DEFAULT_AUDIT_CONFIG.enabled),
-	minimumSeverity: severitySchema.catch(DEFAULT_AUDIT_CONFIG.minimumSeverity)
-})
+/**
+ * Parse the `ignore` field: entries need a string `pattern`; malformed
+ * entries are dropped rather than rejecting the whole config.
+ */
+function parseIgnoreRules({
+	raw
+}: {
+	raw: JsonValue | undefined
+}): Array<IgnoreRule> {
+	if (!Array.isArray(raw)) {
+		return []
+	}
 
-export function parseAuditConfig({ raw }: { raw: unknown }): AuditConfig {
-	const parsed = auditConfigSchema.safeParse(raw)
-	return parsed.success ? parsed.data : DEFAULT_AUDIT_CONFIG
+	return raw.flatMap((item) => {
+		const object = readJsonObject(item)
+		if (!object) {
+			return []
+		}
+		const pattern = Schema.decodeUnknownOption(Schema.String)(object.pattern)
+		if (Option.isNone(pattern)) {
+			return []
+		}
+		return [
+			{
+				pattern: pattern.value,
+				updateTypes: parseUpdateTypesField({ raw: object.updateTypes })
+			}
+		]
+	})
 }
 
-const autoMergeConfigSchema = z.object({
-	enabled: z.boolean().catch(DEFAULT_AUTO_MERGE_CONFIG.enabled),
-	mergeMethod: mergeMethodSchema.catch(DEFAULT_AUTO_MERGE_CONFIG.mergeMethod)
-})
+export function parseAuditConfig({ raw }: { raw: unknown }): AuditConfig {
+	const object = readJsonObject(raw)
+	if (!object) {
+		return DEFAULT_AUDIT_CONFIG
+	}
+	return {
+		enabled: decodeField(
+			Schema.decodeUnknownOption(Schema.Boolean),
+			object.enabled,
+			DEFAULT_AUDIT_CONFIG.enabled
+		),
+		minimumSeverity: decodeField(
+			Schema.decodeUnknownOption(severitySchema),
+			object.minimumSeverity,
+			DEFAULT_AUDIT_CONFIG.minimumSeverity
+		)
+	}
+}
 
 export function parseAutoMergeConfig({
 	raw
 }: {
 	raw: unknown
 }): AutoMergeConfig {
-	const parsed = autoMergeConfigSchema.safeParse(raw)
-	return parsed.success ? parsed.data : DEFAULT_AUTO_MERGE_CONFIG
-}
-
-const ignoreRuleSchema = z.object({
-	pattern: z.string(),
-	updateTypes: updateTypesField
-})
-
-function parseIgnoreRules({ raw }: { raw: unknown }): Array<IgnoreRule> {
-	if (!Array.isArray(raw)) {
-		return []
+	const object = readJsonObject(raw)
+	if (!object) {
+		return DEFAULT_AUTO_MERGE_CONFIG
 	}
-
-	return raw.flatMap((item) => {
-		const parsed = ignoreRuleSchema.safeParse(item)
-		return parsed.success ? [parsed.data] : []
-	})
+	return {
+		enabled: decodeField(
+			Schema.decodeUnknownOption(Schema.Boolean),
+			object.enabled,
+			DEFAULT_AUTO_MERGE_CONFIG.enabled
+		),
+		mergeMethod: decodeField(
+			Schema.decodeUnknownOption(mergeMethodSchema),
+			object.mergeMethod,
+			DEFAULT_AUTO_MERGE_CONFIG.mergeMethod
+		)
+	}
 }
 
-const configSchema = z.object({
-	branchPrefix: z.string().catch(DEFAULT_CONFIG.branchPrefix),
-	defaultBranch: z.string().catch(DEFAULT_CONFIG.defaultBranch),
-	maxOpenPrs: z.number().catch(DEFAULT_CONFIG.maxOpenPrs),
-	concurrency: z.number().catch(DEFAULT_CONFIG.concurrency),
-	minReleaseAgeDays: z
-		.number()
-		.int()
-		.nonnegative()
-		.catch(DEFAULT_CONFIG.minReleaseAgeDays),
-	groups: z
-		.unknown()
-		.optional()
-		.transform((raw) => parseGroups({ raw })),
-	ignore: z
-		.unknown()
-		.optional()
-		.transform((raw) => parseIgnoreRules({ raw })),
-	audit: auditConfigSchema.catch(DEFAULT_AUDIT_CONFIG),
-	autoMerge: autoMergeConfigSchema.catch(DEFAULT_AUTO_MERGE_CONFIG)
-})
-
-export async function loadConfig({
+/**
+ * Load and decode `.catalog-updaterc.json`.
+ *
+ * The loader never fails: a missing file, malformed JSON or invalid fields
+ * fall back to defaults with a warning, so a broken config can never take a
+ * dependency-update run down.
+ */
+export const loadConfig = Effect.fn('Config.loadConfig')(function* ({
 	configPath
 }: {
 	configPath: string
-}): Promise<Config> {
-	try {
-		const file = Bun.file(configPath)
-		const exists = await file.exists()
+}) {
+	const fs = yield* FileSystem.FileSystem
 
-		if (!exists) {
-			console.warn(`Config file not found at ${configPath}, using defaults`)
-			return DEFAULT_CONFIG
-		}
-
-		const parsed = await file.json()
-		// The manager is now detected from the catalog definition files, so
-		// this legacy option is meaningless — warn rather than silently drop.
-		const asObject = jsonObjectSchema.safeParse(parsed)
-		if (asObject.success && 'packageManager' in asObject.data) {
-			console.warn(
-				'Warning: "packageManager" config is no longer used. The package manager is detected from your catalog definition files (package.json / pnpm-workspace.yaml / .yarnrc.yml).'
-			)
-		}
-		const result = configSchema.safeParse(parsed)
-		if (!result.success) {
-			console.warn(
-				`Config file at ${configPath} is not a JSON object, using defaults`
-			)
-			return DEFAULT_CONFIG
-		}
-		const config = result.data
-
-		// Unattended merges plus a zero-day-old release means a compromised
-		// version can reach the default branch before anyone reads the diff.
-		if (config.autoMerge.enabled && config.minReleaseAgeDays === 0) {
-			console.warn(
-				'Warning: autoMerge is enabled with minReleaseAgeDays: 0. Freshly published versions will merge without review. Set minReleaseAgeDays to quarantine new releases.'
-			)
-		}
-
-		return config
-	} catch (error) {
-		console.error(`Failed to load config from ${configPath}:`, error)
+	const exists = yield* fs.exists(configPath).pipe(
+		// An unreadable path is equivalent to "no config here": fall back to
+		// defaults instead of failing the run.
+		Effect.catch(() => Effect.succeed(false))
+	)
+	if (!exists) {
+		yield* Effect.logWarning(
+			`Config file not found at ${configPath}, using defaults`
+		)
 		return DEFAULT_CONFIG
 	}
-}
+
+	const content = yield* fs.readFileString(configPath).pipe(Effect.option)
+	if (Option.isNone(content)) {
+		yield* Effect.logError(`Failed to load config from ${configPath}`)
+		return DEFAULT_CONFIG
+	}
+
+	const parsed = parseJsonDocument(content.value)
+	if (Option.isNone(parsed)) {
+		yield* Effect.logError(`Failed to load config from ${configPath}`)
+		return DEFAULT_CONFIG
+	}
+
+	const object = readJsonObject(parsed.value)
+	if (!object) {
+		yield* Effect.logWarning(
+			`Config file at ${configPath} is not a JSON object, using defaults`
+		)
+		return DEFAULT_CONFIG
+	}
+
+	// The manager is now detected from the catalog definition files, so this
+	// legacy option is meaningless — warn rather than silently drop.
+	if ('packageManager' in object) {
+		yield* Effect.logWarning(
+			'Warning: "packageManager" config is no longer used. The package manager is detected from your catalog definition files (package.json / pnpm-workspace.yaml / .yarnrc.yml).'
+		)
+	}
+
+	const config: Config = {
+		branchPrefix: decodeField(
+			Schema.decodeUnknownOption(Schema.String),
+			object.branchPrefix,
+			DEFAULT_CONFIG.branchPrefix
+		),
+		defaultBranch: decodeField(
+			Schema.decodeUnknownOption(Schema.String),
+			object.defaultBranch,
+			DEFAULT_CONFIG.defaultBranch
+		),
+		maxOpenPrs: decodeField(
+			Schema.decodeUnknownOption(Schema.Number),
+			object.maxOpenPrs,
+			DEFAULT_CONFIG.maxOpenPrs
+		),
+		concurrency: decodeField(
+			Schema.decodeUnknownOption(Schema.Number),
+			object.concurrency,
+			DEFAULT_CONFIG.concurrency
+		),
+		minReleaseAgeDays: decodeField(
+			Schema.decodeUnknownOption(nonNegativeIntSchema),
+			object.minReleaseAgeDays,
+			DEFAULT_CONFIG.minReleaseAgeDays
+		),
+		groups: parseGroups({ raw: object.groups }),
+		ignore: parseIgnoreRules({ raw: object.ignore }),
+		audit: parseAuditConfig({ raw: object.audit }),
+		autoMerge: parseAutoMergeConfig({ raw: object.autoMerge })
+	}
+
+	// Unattended merges plus a zero-day-old release means a compromised
+	// version can reach the default branch before anyone reads the diff.
+	if (config.autoMerge.enabled && config.minReleaseAgeDays === 0) {
+		yield* Effect.logWarning(
+			'Warning: autoMerge is enabled with minReleaseAgeDays: 0. Freshly published versions will merge without review. Set minReleaseAgeDays to quarantine new releases.'
+		)
+	}
+
+	return config
+})

@@ -1,8 +1,13 @@
+import { Option } from 'effect'
 import { parse as parseYaml, parseDocument } from 'yaml'
-import { readStringRecord, jsonObjectSchema, type JsonValue } from '../schemas'
+import { readStringRecord, readJsonObject, type JsonValue } from '../schemas'
 import { buildCatalogValue } from '../catalog'
 import { type UpdateCandidate } from '../types'
 import { DEFAULT_CATALOG, type ParsedCatalog } from './types'
+
+/** Parse a YAML document, returning None instead of throwing on invalid input. */
+const parseYamlSafe = (input: string): Option.Option<JsonValue> =>
+	Option.liftThrowable((text: string) => parseYaml(text))(input)
 
 /**
  * Check a value is a `Record<string, Record<string, string>>` (the shape of
@@ -11,12 +16,12 @@ import { DEFAULT_CATALOG, type ParsedCatalog } from './types'
 function readNamedCatalogs(
 	value: JsonValue | undefined
 ): Record<string, Record<string, string>> | undefined {
-	const parsed = jsonObjectSchema.safeParse(value)
-	if (!parsed.success) {
+	const parsed = readJsonObject(value)
+	if (!parsed) {
 		return undefined
 	}
 	const result: Record<string, Record<string, string>> = {}
-	for (const [name, entries] of Object.entries(parsed.data)) {
+	for (const [name, entries] of Object.entries(parsed)) {
 		const record = readStringRecord(entries)
 		if (!record) {
 			return undefined
@@ -37,16 +42,14 @@ export function parseYamlCatalogs({
 }: {
 	content: string
 }): Array<ParsedCatalog> {
-	let root: Record<string, JsonValue>
-	try {
-		// Reuse the package.json document schema: both files are mappings of
-		// arbitrary JSON values, so the same validation applies.
-		const parsed = jsonObjectSchema.safeParse(parseYaml(content))
-		if (!parsed.success) {
-			return []
-		}
-		root = parsed.data
-	} catch {
+	const parsed = parseYamlSafe(content)
+	if (Option.isNone(parsed)) {
+		return []
+	}
+	// Reuse the package.json document schema: both files are mappings of
+	// arbitrary JSON values, so the same validation applies.
+	const root = readJsonObject(parsed.value)
+	if (!root) {
 		return []
 	}
 
@@ -110,14 +113,12 @@ export function readYamlTopLevelMap({
 	content: string
 	field: string
 }): Record<string, string> | undefined {
-	let root: Record<string, JsonValue>
-	try {
-		const parsed = jsonObjectSchema.safeParse(parseYaml(content))
-		if (!parsed.success) {
-			return undefined
-		}
-		root = parsed.data
-	} catch {
+	const parsed = parseYamlSafe(content)
+	if (Option.isNone(parsed)) {
+		return undefined
+	}
+	const root = readJsonObject(parsed.value)
+	if (!root) {
 		return undefined
 	}
 	return readStringRecord(root[field])

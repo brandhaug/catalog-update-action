@@ -1,4 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test'
+import { Effect } from 'effect'
+import { BunFileSystem } from '@effect/platform-bun'
 import { discoverCatalogLocations } from '../src/discover'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -16,6 +18,13 @@ function writeText(dir: string, file: string, content: string): void {
   writeFileSync(join(dir, file), content)
 }
 
+/** Run discovery with the real Bun filesystem layer. */
+function discover(cwd: string, excludePatterns: Array<string>) {
+  return discoverCatalogLocations({ cwd, excludePatterns }).pipe(
+    Effect.provide(BunFileSystem.layer)
+  )
+}
+
 beforeEach(() => {
   mkdirSync(FIXTURE_DIR, { recursive: true })
 })
@@ -28,7 +37,7 @@ describe('discoverCatalogLocations', () => {
   test('finds root bun catalog', async () => {
     writeJsonObject(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
       dir: '.',
@@ -42,7 +51,7 @@ describe('discoverCatalogLocations', () => {
     writeJsonObject(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
     writeJsonObject(join(FIXTURE_DIR, 'apps/backend'), { catalog: { express: '5.0.0' } })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result.map((l) => l.dir)).toEqual(['apps/backend', 'apps/frontend'])
   })
 
@@ -53,7 +62,7 @@ describe('discoverCatalogLocations', () => {
       'packages:\n  - packages/*\n\ncatalog:\n  react: ^19.0.0\n\ncatalogs:\n  react18:\n    react: ^18.3.1\n'
     )
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toHaveLength(2)
     expect(result.map((l) => l.definition.catalogName)).toEqual(['default', 'react18'])
     expect(result[0]).toMatchObject({
@@ -71,7 +80,7 @@ describe('discoverCatalogLocations', () => {
       'nodeLinker: node-modules\n\ncatalog:\n  lodash: ^4.17.21\n'
     )
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toHaveLength(1)
     expect(result[0]).toMatchObject({
       dir: '.',
@@ -86,7 +95,7 @@ describe('discoverCatalogLocations', () => {
     writeText(FIXTURE_DIR, 'pnpm-workspace.yaml', 'catalog:\n  vue: ^3.5.0\n')
     writeText(FIXTURE_DIR, '.yarnrc.yml', 'catalog:\n  svelte: ^5.0.0\n')
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result.map((l) => l.providerId)).toEqual(['bun', 'pnpm', 'yarn'])
   })
 
@@ -95,7 +104,7 @@ describe('discoverCatalogLocations', () => {
     writeText(FIXTURE_DIR, 'pnpm-workspace.yaml', 'packages:\n  - packages/*\n')
     writeText(FIXTURE_DIR, '.yarnrc.yml', 'nodeLinker: node-modules\n')
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toEqual([])
   })
 
@@ -103,7 +112,7 @@ describe('discoverCatalogLocations', () => {
     writeJsonObject(FIXTURE_DIR, { catalog: { react: '19.0.0' } })
     writeJsonObject(join(FIXTURE_DIR, 'node_modules/react'), { catalog: { scheduler: '1.0.0' } })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result.map((l) => l.dir)).toEqual(['.'])
   })
 
@@ -112,7 +121,7 @@ describe('discoverCatalogLocations', () => {
     writeJsonObject(join(FIXTURE_DIR, 'apps/legacy'), { catalog: { jquery: '3.0.0' } })
     writeJsonObject(join(FIXTURE_DIR, 'apps/frontend'), { catalog: { react: '19.0.0' } })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: ['apps/legacy'] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, ['apps/legacy']))
     expect(result.map((l) => l.dir)).toEqual(['.', 'apps/frontend'])
   })
 
@@ -121,14 +130,14 @@ describe('discoverCatalogLocations', () => {
     writeJsonObject(join(FIXTURE_DIR, 'apps/old-api'), { catalog: { express: '4.0.0' } })
     writeJsonObject(join(FIXTURE_DIR, 'apps/old-web'), { catalog: { jquery: '3.0.0' } })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: ['apps/old-*'] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, ['apps/old-*']))
     expect(result.map((l) => l.dir)).toEqual(['apps/frontend'])
   })
 
   test('returns empty array when no catalogs found', async () => {
     writeJsonObject(FIXTURE_DIR, { name: 'root' })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toEqual([])
   })
 
@@ -137,21 +146,21 @@ describe('discoverCatalogLocations', () => {
     writeJsonObject(join(FIXTURE_DIR, '.github'), { catalog: { actions: '1.0.0' } })
     writeText(join(FIXTURE_DIR, '.yarn'), '.yarnrc.yml', 'catalog:\n  react: ^19.0.0\n')
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result.map((l) => l.dir)).toEqual(['.'])
   })
 
   test('skips catalog with array value (invalid)', async () => {
     writeJsonObject(FIXTURE_DIR, { catalog: ['react', 'vue'] })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toEqual([])
   })
 
   test('skips invalid YAML instead of throwing', async () => {
     writeText(FIXTURE_DIR, 'pnpm-workspace.yaml', 'catalog: [unclosed\n  bad yaml: :')
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toEqual([])
   })
 
@@ -160,7 +169,7 @@ describe('discoverCatalogLocations', () => {
       workspaces: { packages: ['packages/*'], catalog: { react: '19.0.0' } }
     })
 
-    const result = await discoverCatalogLocations({ cwd: FIXTURE_DIR, excludePatterns: [] })
+    const result = await Effect.runPromise(discover(FIXTURE_DIR, []))
     expect(result).toHaveLength(1)
     expect(result[0]?.definition).toEqual({
       catalogName: 'default',

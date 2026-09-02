@@ -1,44 +1,59 @@
-import { z } from 'zod'
+import { Option, Schema } from 'effect'
 
 /** Severity levels shared by the audit pipeline and the config boundary. */
-const SEVERITIES = ['info', 'low', 'moderate', 'high', 'critical'] as const
-export const severitySchema = z.enum(SEVERITIES)
-export type Severity = z.infer<typeof severitySchema>
-
-/** A closed JSON value: any JSON data, recursively. */
-export type JsonValue =
-	| string
-	| number
-	| boolean
-	| null
-	| Array<JsonValue>
-	| { [key: string]: JsonValue }
-
-const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
-	z.union([
-		z.string(),
-		z.number(),
-		z.boolean(),
-		z.null(),
-		z.array(jsonValueSchema),
-		z.record(z.string(), jsonValueSchema)
-	])
-)
-
-/** A raw JSON object document: an object whose values are arbitrary JSON. */
-export const jsonObjectSchema = z.record(z.string(), jsonValueSchema)
-export type JsonObject = z.infer<typeof jsonObjectSchema>
-
-/** An object whose values are all strings (catalog entries, override maps). */
-const stringRecordSchema = z.record(z.string(), z.string())
+export const severitySchema = Schema.Literals([
+	'info',
+	'low',
+	'moderate',
+	'high',
+	'critical'
+])
+export type Severity = typeof severitySchema.Type
 
 /**
- * Read an object field as a flat string map (catalog entries, override maps),
- * returning undefined when the field is missing or not a string record.
+ * A closed JSON value: any JSON data, recursively. Effect ships this as
+ * `Schema.Json` (readonly view); the mutable alias below matches the shape the
+ * transformation code builds.
+ */
+export type JsonValue = Schema.Json
+
+/** Schema for a raw JSON object document: arbitrary JSON, object at the root. */
+export const jsonObjectSchema = Schema.Record(Schema.String, Schema.Json)
+export type JsonObject = Record<string, JsonValue>
+
+/**
+ * Parse a JSON document, returning None instead of throwing on invalid input.
+ * The repo's single JSON.parse codec: every raw JSON string flows through here
+ * before any Schema decoding happens.
+ */
+export const parseJsonDocument = (input: string): Option.Option<unknown> =>
+	Option.liftThrowable(JSON.parse)(input)
+
+/**
+ * Decode a raw JSON object document, returning a mutable copy on success and
+ * undefined when the value is not an object of JSON values.
+ */
+export function readJsonObject(value: unknown): JsonObject | undefined {
+	const result = Schema.decodeUnknownResult(jsonObjectSchema)(value)
+	if (result._tag === 'Failure') {
+		return undefined
+	}
+	return { ...result.success }
+}
+
+/** Schema for a flat string map (catalog entries, override maps). */
+const stringRecordSchema = Schema.Record(Schema.String, Schema.String)
+
+/**
+ * Read a value as a flat string map (catalog entries, override maps),
+ * returning undefined when the value is missing or not a string record.
  */
 export function readStringRecord(
-	value: JsonValue | undefined
+	value: unknown
 ): Record<string, string> | undefined {
-	const parsed = stringRecordSchema.safeParse(value)
-	return parsed.success ? parsed.data : undefined
+	const result = Schema.decodeUnknownResult(stringRecordSchema)(value)
+	if (result._tag === 'Failure') {
+		return undefined
+	}
+	return { ...result.success }
 }

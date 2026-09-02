@@ -1,7 +1,8 @@
-import { z } from 'zod'
+import { Option, Schema } from 'effect'
 import {
 	readStringRecord,
-	jsonObjectSchema,
+	readJsonObject,
+	parseJsonDocument,
 	severitySchema,
 	type JsonObject,
 	type JsonValue
@@ -16,12 +17,6 @@ import {
 } from './types'
 import { readJsonStringMap, writeJsonStringMap } from './json'
 
-/** Validate a value as a JSON object, returning a parsed copy. */
-function readObject(value: JsonValue | undefined): JsonObject | undefined {
-	const parsed = jsonObjectSchema.safeParse(value)
-	return parsed.success ? parsed.data : undefined
-}
-
 /**
  * Bun defines catalogs as `catalog` (default) and `catalogs.<name>` at the
  * top level of package.json, or nested inside the `workspaces` object. All
@@ -33,9 +28,9 @@ function catalogSections(pkg: JsonObject): Array<{
 	path: Array<string>
 	entries: Record<string, string>
 }> {
-	const workspaces = readObject(pkg.workspaces)
-	const topLevelCatalogs = readObject(pkg.catalogs)
-	const nestedCatalogs = readObject(workspaces?.catalogs)
+	const workspaces = readJsonObject(pkg.workspaces)
+	const topLevelCatalogs = readJsonObject(pkg.catalogs)
+	const nestedCatalogs = readJsonObject(workspaces?.catalogs)
 
 	const sections: Array<{
 		catalogName: string
@@ -98,7 +93,7 @@ function withCatalogUpdates(
 
 	const head = path.at(0)
 	if (head !== undefined) {
-		const child = readObject(result[head])
+		const child = readJsonObject(result[head])
 		if (child) {
 			result[head] = withCatalogUpdates(child, path.slice(1), updates)
 		}
@@ -106,19 +101,26 @@ function withCatalogUpdates(
 	return result
 }
 
+/** Parse a package.json document, returning undefined when it is not JSON. */
+function parsePackageJson({
+	content
+}: {
+	content: string
+}): JsonObject | undefined {
+	const parsed = parseJsonDocument(content)
+	if (Option.isNone(parsed)) {
+		return undefined
+	}
+	return readJsonObject(parsed.value)
+}
+
 export function parseBunCatalogs({
 	content
 }: {
 	content: string
 }): Array<ParsedCatalog> {
-	let pkg: JsonObject
-	try {
-		const parsed = jsonObjectSchema.safeParse(JSON.parse(content))
-		if (!parsed.success) {
-			return []
-		}
-		pkg = parsed.data
-	} catch {
+	const pkg = parsePackageJson({ content })
+	if (!pkg) {
 		return []
 	}
 
@@ -146,14 +148,8 @@ export function applyBunCatalogUpdates({
 	catalogName: string
 	updates: Array<UpdateCandidate>
 }): string {
-	let pkg: JsonObject
-	try {
-		const parsed = jsonObjectSchema.safeParse(JSON.parse(content))
-		if (!parsed.success) {
-			throw new Error('invalid package.json')
-		}
-		pkg = parsed.data
-	} catch {
+	const pkg = parsePackageJson({ content })
+	if (!pkg) {
 		throw new Error('Invalid package.json')
 	}
 
@@ -173,17 +169,20 @@ export function applyBunCatalogUpdates({
 // ---------------------------------------------------------------------------
 
 /** Validate a `bun audit --json` advisory entry before trusting its fields. */
-const bunAdvisorySchema = z.object({
-	id: z.number(),
-	url: z.string(),
-	title: z.string(),
+const bunAdvisorySchema = Schema.Struct({
+	id: Schema.Number,
+	url: Schema.String,
+	title: Schema.String,
 	severity: severitySchema,
-	vulnerable_versions: z.string(),
-	cwe: z.array(z.string()),
-	cvss: z.object({ score: z.number(), vectorString: z.string() })
+	vulnerable_versions: Schema.String,
+	cwe: Schema.Array(Schema.String),
+	cvss: Schema.Struct({ score: Schema.Number, vectorString: Schema.String })
 })
 
-const bunAuditResultSchema = z.record(z.string(), z.array(bunAdvisorySchema))
+const bunAuditResultSchema = Schema.Record(
+	Schema.String,
+	Schema.Array(bunAdvisorySchema)
+)
 
 /** bun audit reports advisories grouped by package name, matching AuditResult. */
 function parseBunAuditOutput({
@@ -191,12 +190,32 @@ function parseBunAuditOutput({
 }: {
 	output: string
 }): AuditResult | null {
-	try {
-		const parsed = bunAuditResultSchema.safeParse(JSON.parse(output))
-		return parsed.success ? parsed.data : null
-	} catch {
+	const parsed = parseJsonDocument(output)
+	if (Option.isNone(parsed)) {
 		return null
 	}
+	const result = Schema.decodeUnknownResult(bunAuditResultSchema)(parsed.value)
+	if (result._tag === 'Failure') {
+		return null
+	}
+	// Schema records and arrays are readonly; the pipeline builds mutable
+	// advisory lists.
+	const auditResult: AuditResult = {}
+	for (const [packageName, advisories] of Object.entries(result.success)) {
+		auditResult[packageName] = advisories.map((advisory) => ({
+			id: advisory.id,
+			url: advisory.url,
+			title: advisory.title,
+			severity: advisory.severity,
+			vulnerable_versions: advisory.vulnerable_versions,
+			cwe: [...advisory.cwe],
+			cvss: {
+				score: advisory.cvss.score,
+				vectorString: advisory.cvss.vectorString
+			}
+		}))
+	}
+	return auditResult
 }
 
 export const bunAudit: AuditCapability = {

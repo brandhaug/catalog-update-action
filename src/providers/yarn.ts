@@ -1,7 +1,7 @@
-import { z } from 'zod'
+import { Option, Schema } from 'effect'
 import { severitySchema } from '../schemas'
 import { parseSemver } from '../utils'
-import { type AuditResult } from '../types'
+import { type AuditResult, type Severity } from '../types'
 import { type AuditCapability, type CatalogProvider } from './types'
 import { readJsonStringMap, writeJsonStringMap } from './json'
 import { applyYamlCatalogUpdates, parseYamlCatalogs } from './yaml'
@@ -12,19 +12,21 @@ import { applyYamlCatalogUpdates, parseYamlCatalogs } from './yaml'
 
 // `yarn npm audit --json` emits NDJSON: one advisory per line, with the
 // human-readable field names berry uses for its table output.
-const yarnAuditLineSchema = z.object({
-	value: z.string(),
-	children: z.object({
-		ID: z.union([z.number(), z.string()]),
-		Issue: z.string(),
-		URL: z.string(),
-		Severity: z
-			.string()
-			.transform((severity) => severity.toLowerCase())
-			.pipe(severitySchema),
-		'Vulnerable Versions': z.string()
+const yarnAuditLineSchema = Schema.Struct({
+	value: Schema.String,
+	children: Schema.Struct({
+		ID: Schema.Union([Schema.Number, Schema.String]),
+		Issue: Schema.String,
+		URL: Schema.String,
+		Severity: Schema.String,
+		'Vulnerable Versions': Schema.String
 	})
 })
+
+/** Decode an audit severity: case-insensitive member of the severity set. */
+function parseSeverity({ raw }: { raw: string }): Option.Option<Severity> {
+	return Schema.decodeUnknownOption(severitySchema)(raw.toLowerCase())
+}
 
 function parseYarnAuditOutput({
 	output
@@ -42,24 +44,26 @@ function parseYarnAuditOutput({
 	const result: AuditResult = {}
 	let parsedCount = 0
 	for (const line of lines) {
-		let raw: unknown
-		try {
-			raw = JSON.parse(line)
-		} catch {
+		const raw = parseJsonLine(line)
+		if (Option.isNone(raw)) {
 			continue
 		}
-		const parsed = yarnAuditLineSchema.safeParse(raw)
-		if (!parsed.success) {
+		const parsed = Schema.decodeUnknownResult(yarnAuditLineSchema)(raw.value)
+		if (parsed._tag === 'Failure') {
+			continue
+		}
+		const severity = parseSeverity({ raw: parsed.success.children.Severity })
+		if (Option.isNone(severity)) {
 			continue
 		}
 		parsedCount++
-		const advisory = parsed.data
+		const advisory = parsed.success
 		const advisories = result[advisory.value] ?? []
 		advisories.push({
 			id: Number(advisory.children.ID),
 			url: advisory.children.URL,
 			title: advisory.children.Issue,
-			severity: advisory.children.Severity,
+			severity: severity.value,
 			vulnerable_versions: advisory.children['Vulnerable Versions']
 		})
 		result[advisory.value] = advisories
@@ -72,6 +76,10 @@ function parseYarnAuditOutput({
 	}
 	return result
 }
+
+/** Parse one NDJSON line, returning None for malformed JSON. */
+const parseJsonLine = (input: string): Option.Option<unknown> =>
+	Option.liftThrowable(JSON.parse)(input)
 
 // ---------------------------------------------------------------------------
 // Overrides

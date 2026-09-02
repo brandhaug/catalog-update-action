@@ -1,4 +1,4 @@
-import { z } from 'zod'
+import { Option, Schema } from 'effect'
 import { severitySchema } from '../schemas'
 import { isToolOverrideKey, overrideKey } from '../utils'
 import { type AuditResult } from '../types'
@@ -10,25 +10,31 @@ import {
 	writeYamlTopLevelMap
 } from './yaml'
 
+/** Parse a JSON document, returning None instead of throwing on invalid input. */
+const parseJson = (input: string): Option.Option<unknown> =>
+	Option.liftThrowable(JSON.parse)(input)
+
 // ---------------------------------------------------------------------------
 // Audit
 // ---------------------------------------------------------------------------
 
 // pnpm `audit --json` emits the npm 6 style: one map of advisories keyed by
 // advisory id, each carrying the fields we need for override computation.
-const pnpmAdvisorySchema = z.object({
-	id: z.union([z.number(), z.string()]),
-	module_name: z.string(),
+const pnpmAdvisorySchema = Schema.Struct({
+	id: Schema.Union([Schema.Number, Schema.String]),
+	module_name: Schema.String,
 	severity: severitySchema,
-	vulnerable_versions: z.string(),
-	title: z.string(),
-	url: z.string(),
-	cvss: z.object({ score: z.number(), vectorString: z.string() }).optional(),
-	cwe: z.array(z.string()).optional()
+	vulnerable_versions: Schema.String,
+	title: Schema.String,
+	url: Schema.String,
+	cvss: Schema.optionalKey(
+		Schema.Struct({ score: Schema.Number, vectorString: Schema.String })
+	),
+	cwe: Schema.optionalKey(Schema.Array(Schema.String))
 })
 
-const pnpmAuditOutputSchema = z.object({
-	advisories: z.record(z.string(), pnpmAdvisorySchema)
+const pnpmAuditOutputSchema = Schema.Struct({
+	advisories: Schema.Record(Schema.String, pnpmAdvisorySchema)
 })
 
 function parsePnpmAuditOutput({
@@ -36,32 +42,30 @@ function parsePnpmAuditOutput({
 }: {
 	output: string
 }): AuditResult | null {
-	let data: unknown
-	try {
-		data = JSON.parse(output)
-	} catch {
+	const parsed = parseJson(output)
+	if (Option.isNone(parsed)) {
 		return null
 	}
-	const parsed = pnpmAuditOutputSchema.safeParse(data)
-	if (!parsed.success) {
+	const result = Schema.decodeUnknownResult(pnpmAuditOutputSchema)(parsed.value)
+	if (result._tag === 'Failure') {
 		return null
 	}
 
-	const result: AuditResult = {}
-	for (const advisory of Object.values(parsed.data.advisories)) {
-		const advisories = result[advisory.module_name] ?? []
+	const auditResult: AuditResult = {}
+	for (const advisory of Object.values(result.success.advisories)) {
+		const advisories = auditResult[advisory.module_name] ?? []
 		advisories.push({
 			id: Number(advisory.id),
 			url: advisory.url,
 			title: advisory.title,
 			severity: advisory.severity,
 			vulnerable_versions: advisory.vulnerable_versions,
-			cwe: advisory.cwe,
-			cvss: advisory.cvss
+			cwe: advisory.cwe === undefined ? undefined : [...advisory.cwe],
+			cvss: advisory.cvss === undefined ? undefined : { ...advisory.cvss }
 		})
-		result[advisory.module_name] = advisories
+		auditResult[advisory.module_name] = advisories
 	}
-	return result
+	return auditResult
 }
 
 const pnpmAudit: AuditCapability = {

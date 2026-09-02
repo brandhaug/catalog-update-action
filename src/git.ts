@@ -1,6 +1,11 @@
-import { unlinkSync } from 'node:fs'
-import { z } from 'zod'
+import { Effect, FileSystem, Option, Schema } from 'effect'
+import { Commands } from './commands'
+import { formatReleaseNotes } from './registry'
+import { parseJsonDocument } from './schemas'
+import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
+import { expectedInstallBasenames, getProvider } from './providers'
 import {
+	BranchApplyError,
 	type BranchUpdate,
 	type CatalogLocation,
 	type Config,
@@ -9,43 +14,16 @@ import {
 	type UpdateCandidate,
 	type VersionReleaseNote
 } from './types'
-import { formatReleaseNotes } from './registry'
-import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
-import { expectedInstallBasenames, getProvider } from './providers'
 
 // ---------------------------------------------------------------------------
-// Shell execution
+// Errors
 // ---------------------------------------------------------------------------
 
-export async function exec({
-	command,
-	cwd
-}: {
-	command: Array<string>
-	cwd: string
-}): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-	const proc = Bun.spawn(command, {
-		cwd,
-		stdout: 'pipe',
-		stderr: 'pipe',
-		env: process.env
-	})
-
-	const [stdout, stderr] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text()
-	])
-	const exitCode = await proc.exited
-
-	if (exitCode !== 0) {
-		console.error(`  Command failed: ${command.join(' ')}`)
-		if (stderr.trim()) {
-			console.error(`  stderr: ${stderr.trim()}`)
-		}
-	}
-
-	return { stdout: stdout.trim(), stderr: stderr.trim(), exitCode }
-}
+/** Fatal git workflow failure: the working tree could not be restored. */
+export class GitError extends Schema.TaggedError<GitError>()('GitError', {
+	operation: Schema.String,
+	cause: Schema.Defect()
+}) {}
 
 // ---------------------------------------------------------------------------
 // Catalog PR body
@@ -118,15 +96,40 @@ export function buildCatalogBranchUpdate({
 		affectedFiles,
 		expectedBasenames: expectedInstallBasenames({ provider, affectedFiles }),
 		installCommand: provider.installCommand,
-		apply: async () => {
-			const content = await Bun.file(definitionPath).text()
-			const updated = provider.applyUpdates({
-				content,
-				catalogName: location.definition.catalogName,
-				updates
+		apply: Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const content = yield* fs.readFileString(definitionPath).pipe(
+				Effect.mapError(
+					(cause) =>
+						new BranchApplyError({
+							operation: 'Git.buildCatalogBranchUpdate.read',
+							cause
+						})
+				)
+			)
+			const updated = yield* Effect.try({
+				try: () =>
+					provider.applyUpdates({
+						content,
+						catalogName: location.definition.catalogName,
+						updates
+					}),
+				catch: (cause) =>
+					new BranchApplyError({
+						operation: 'Git.buildCatalogBranchUpdate.applyUpdates',
+						cause
+					})
 			})
-			await Bun.write(definitionPath, updated)
-		}
+			yield* fs.writeFileString(definitionPath, updated).pipe(
+				Effect.mapError(
+					(cause) =>
+						new BranchApplyError({
+							operation: 'Git.buildCatalogBranchUpdate.write',
+							cause
+						})
+				)
+			)
+		})
 	}
 }
 
@@ -134,21 +137,23 @@ export function buildCatalogBranchUpdate({
 // Existing PRs
 // ---------------------------------------------------------------------------
 
-const mergeableSchema = z.enum(['MERGEABLE', 'CONFLICTING', 'UNKNOWN'])
+const mergeableSchema = Schema.Literals(['MERGEABLE', 'CONFLICTING', 'UNKNOWN'])
 
 /** Validate a `gh pr list --json` item before trusting its fields. */
-const existingPrSchema = z.object({
-	headRefName: z.string(),
-	number: z.number(),
+const existingPrSchema = Schema.Struct({
+	headRefName: Schema.String,
+	number: Schema.Number,
 	mergeable: mergeableSchema,
-	title: z.string()
+	title: Schema.String
 })
 
 /** Shape of `gh api repos/{owner}/{repo}/pulls/N/commits` output. */
-const prApiCommitsSchema = z.array(
-	z.object({
-		author: z.object({ login: z.string().nullable() }).nullable().default(null),
-		parents: z.array(z.unknown()).default([])
+const prApiCommitsSchema = Schema.Array(
+	Schema.Struct({
+		author: Schema.optionalKey(
+			Schema.NullOr(Schema.Struct({ login: Schema.NullOr(Schema.String) }))
+		),
+		parents: Schema.optionalKey(Schema.Array(Schema.Unknown))
 	})
 )
 
@@ -158,30 +163,31 @@ const prApiCommitsSchema = z.array(
  * ignored regardless of author.
  */
 export function hasHumanContentCommits({ raw }: { raw: unknown }): boolean {
-	const parsed = prApiCommitsSchema.safeParse(raw)
+	const parsed = Schema.decodeUnknownResult(prApiCommitsSchema)(raw)
 	// Any malformed shape or non-bot author means the PR may carry human
 	// work, so it is treated as "has human content commits" and left alone.
-	if (!parsed.success) {
+	if (parsed._tag === 'Failure') {
 		return true
 	}
-	return parsed.data.some(
+	return parsed.success.some(
 		(commit) =>
-			commit.parents.length < 2 &&
+			(commit.parents ?? []).length < 2 &&
 			commit.author?.login !== 'github-actions[bot]'
 	)
 }
 
-const mergeableStateSchema = z.object({ mergeable: mergeableSchema })
+const mergeableStateSchema = Schema.Struct({ mergeable: mergeableSchema })
 
-export async function getExistingPrs({
+export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 	cwd,
 	branchPrefix
 }: {
 	cwd: string
 	branchPrefix: string
-}): Promise<Array<ExistingPr>> {
-	const { stdout } = await exec({
-		command: [
+}) {
+	const commands = yield* Commands
+	const result = yield* commands.exec(
+		[
 			'gh',
 			'pr',
 			'list',
@@ -192,118 +198,131 @@ export async function getExistingPrs({
 			'--json',
 			'headRefName,number,mergeable,title'
 		],
-		cwd
-	})
+		{ cwd }
+	)
 
-	try {
-		const parsed = z
-			.array(existingPrSchema)
-			.safeParse(JSON.parse(stdout || '[]'))
-		if (!parsed.success) {
-			return []
-		}
-		return parsed.data.filter(
-			(pr) =>
-				pr.headRefName.startsWith(`${branchPrefix}/`) ||
-				pr.headRefName.startsWith(
-					`${getOverrideBranchPrefix({ branchPrefix })}/`
-				)
-		)
-	} catch {
+	const parsed = parseJsonDocument(result.stdout || '[]')
+	if (Option.isNone(parsed)) {
 		return []
 	}
-}
 
-async function hasNonBotCommits({
-	pr,
-	cwd
-}: {
-	pr: ExistingPr
-	cwd: string
-}): Promise<boolean> {
-	const { stdout, exitCode } = await exec({
-		command: ['gh', 'api', `repos/{owner}/{repo}/pulls/${pr.number}/commits`],
-		cwd
-	})
-
-	if (exitCode !== 0) {
-		return true
-	}
-
-	try {
-		return hasHumanContentCommits(JSON.parse(stdout))
-	} catch {
-		return true
-	}
-}
-
-async function resolveMergeableState({
-	pr,
-	cwd
-}: {
-	pr: ExistingPr
-	cwd: string
-}): Promise<ExistingPr['mergeable']> {
-	if (pr.mergeable !== 'UNKNOWN') {
-		return pr.mergeable
-	}
-
-	console.log(
-		`  PR #${pr.number} has UNKNOWN mergeable state, retrying in 5s...`
+	const decoded = Schema.decodeUnknownResult(Schema.Array(existingPrSchema))(
+		parsed.value
 	)
-	await Bun.sleep(5000)
-
-	const { stdout, exitCode } = await exec({
-		command: ['gh', 'pr', 'view', String(pr.number), '--json', 'mergeable'],
-		cwd
-	})
-
-	if (exitCode !== 0) {
-		return 'UNKNOWN'
+	if (decoded._tag === 'Failure') {
+		return []
 	}
-
-	try {
-		const parsed = mergeableStateSchema.safeParse(JSON.parse(stdout))
-		if (!parsed.success) {
-			return 'UNKNOWN'
-		}
-		return parsed.data.mergeable
-	} catch {
-		return 'UNKNOWN'
-	}
-}
+	return decoded.success.filter(
+		(pr) =>
+			pr.headRefName.startsWith(`${branchPrefix}/`) ||
+			pr.headRefName.startsWith(`${getOverrideBranchPrefix({ branchPrefix })}/`)
+	)
+})
 
 // ---------------------------------------------------------------------------
 // Branch operations
 // ---------------------------------------------------------------------------
 
-async function isBranchBehindDefault({
-	branch,
-	defaultBranch,
+const execLogged = Effect.fn('Git.execLogged')(function* (
+	command: Array<string>,
+	cwd: string
+) {
+	const commands = yield* Commands
+	const result = yield* commands.exec(command, { cwd })
+	if (result.exitCode !== 0) {
+		yield* Effect.logError(`  Command failed: ${command.join(' ')}`)
+		if (result.stderr) {
+			yield* Effect.logError(`  stderr: ${result.stderr}`)
+		}
+	}
+	return result
+})
+
+const hasNonBotCommits = Effect.fn('Git.hasNonBotCommits')(function* ({
+	pr,
 	cwd
 }: {
-	branch: string
-	defaultBranch: string
+	pr: ExistingPr
 	cwd: string
-}): Promise<boolean> {
-	const { stdout, exitCode } = await exec({
-		command: [
-			'git',
-			'rev-list',
-			'--count',
-			`origin/${branch}..origin/${defaultBranch}`
-		],
-		cwd
-	})
-
-	if (exitCode !== 0) {
+}) {
+	const commands = yield* Commands
+	const result = yield* commands.exec(
+		['gh', 'api', `repos/{owner}/{repo}/pulls/${pr.number}/commits`],
+		{ cwd }
+	)
+	if (result.exitCode !== 0) {
 		return true
 	}
-	return Number(stdout) > 0
-}
+
+	const parsed = parseJsonDocument(result.stdout)
+	if (Option.isNone(parsed)) {
+		return true
+	}
+	return hasHumanContentCommits({ raw: parsed.value })
+})
+
+const resolveMergeableState = Effect.fn('Git.resolveMergeableState')(
+	function* ({ pr, cwd }: { pr: ExistingPr; cwd: string }) {
+		if (pr.mergeable !== 'UNKNOWN') {
+			return pr.mergeable
+		}
+
+		yield* Effect.logInfo(
+			`  PR #${pr.number} has UNKNOWN mergeable state, retrying in 5s...`
+		)
+		yield* Effect.sleep('5 seconds')
+
+		const result = yield* execLogged(
+			['gh', 'pr', 'view', String(pr.number), '--json', 'mergeable'],
+			cwd
+		)
+		if (result.exitCode !== 0) {
+			return 'UNKNOWN'
+		}
+
+		const option = parseJsonDocument(result.stdout)
+		if (Option.isNone(option)) {
+			return 'UNKNOWN'
+		}
+		const decoded = Schema.decodeUnknownResult(mergeableStateSchema)(
+			option.value
+		)
+		if (decoded._tag === 'Failure') {
+			return 'UNKNOWN'
+		}
+		return decoded.success.mergeable
+	}
+)
+
+const isBranchBehindDefault = Effect.fn('Git.isBranchBehindDefault')(
+	function* ({
+		branch,
+		defaultBranch,
+		cwd
+	}: {
+		branch: string
+		defaultBranch: string
+		cwd: string
+	}) {
+		const result = yield* execLogged(
+			[
+				'git',
+				'rev-list',
+				'--count',
+				`origin/${branch}..origin/${defaultBranch}`
+			],
+			cwd
+		)
+
+		if (result.exitCode !== 0) {
+			return true
+		}
+		return Number(result.stdout) > 0
+	}
+)
 
 /** Read a single file from a remote branch via `git show`; null when absent. */
-async function readBranchFile({
+const readBranchFile = Effect.fn('Git.readBranchFile')(function* ({
 	branch,
 	relPath,
 	cwd
@@ -311,42 +330,50 @@ async function readBranchFile({
 	branch: string
 	relPath: string
 	cwd: string
-}): Promise<string | null> {
-	const { stdout, exitCode } = await exec({
-		command: ['git', 'show', `origin/${branch}:${relPath}`],
-		cwd
-	})
+}) {
+	const commands = yield* Commands
+	const result = yield* commands.exec(
+		['git', 'show', `origin/${branch}:${relPath}`],
+		{
+			cwd
+		}
+	)
 
-	if (exitCode !== 0) {
+	if (result.exitCode !== 0) {
 		return null
 	}
-	return stdout
-}
+	return result.stdout
+})
 
-async function returnToDefault({
+/**
+ * Return the working tree to the default branch. Failure is fatal to the
+ * remaining groups, so it surfaces as a typed GitError.
+ */
+const returnToDefault = Effect.fn('Git.returnToDefault')(function* ({
 	defaultBranch,
 	cwd
 }: {
 	defaultBranch: string
 	cwd: string
-}): Promise<void> {
-	await exec({ command: ['git', 'checkout', '--', '.'], cwd })
-	const { exitCode } = await exec({
-		command: ['git', 'checkout', defaultBranch],
+}) {
+	yield* execLogged(['git', 'checkout', '--', '.'], cwd)
+	const commands = yield* Commands
+	const result = yield* commands.exec(['git', 'checkout', defaultBranch], {
 		cwd
 	})
-	if (exitCode !== 0) {
-		throw new Error(
-			`Fatal: failed to return to ${defaultBranch} branch. Aborting remaining groups.`
-		)
+	if (result.exitCode !== 0) {
+		return yield* new GitError({
+			operation: 'Git.returnToDefault',
+			cause: `failed to check out ${defaultBranch}: ${result.stderr}`
+		})
 	}
-}
+})
 
 // ---------------------------------------------------------------------------
 // Generic branch update + PR creation
 // ---------------------------------------------------------------------------
 
-async function updateBranch({
+const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	branchUpdate,
 	config,
 	dir
@@ -354,7 +381,7 @@ async function updateBranch({
 	branchUpdate: BranchUpdate
 	config: Config
 	dir: DirectoryContext
-}): Promise<{ success: boolean }> {
+}) {
 	const {
 		branch,
 		title,
@@ -366,96 +393,99 @@ async function updateBranch({
 	} = branchUpdate
 	const { cwd, workDir } = dir
 
-	const checkoutResult = await exec({
-		command: [
-			'git',
-			'checkout',
-			'-B',
-			branch,
-			`origin/${config.defaultBranch}`
-		],
-		cwd
-	})
+	const commands = yield* Commands
+	const fs = yield* FileSystem.FileSystem
+
+	const checkoutResult = yield* commands.exec(
+		['git', 'checkout', '-B', branch, `origin/${config.defaultBranch}`],
+		{ cwd }
+	)
 	if (checkoutResult.exitCode !== 0) {
 		return { success: false }
 	}
 
 	// Roll back to the default branch after any mid-pipeline failure so the
 	// next group isn't processed from a half-built branch state.
-	const fail = async (message: string): Promise<{ success: false }> => {
-		console.error(message)
-		await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
-		return { success: false }
-	}
+	const fail = (message: string) =>
+		Effect.gen(function* () {
+			yield* Effect.logError(message)
+			yield* returnToDefault({ defaultBranch: config.defaultBranch, cwd })
+			return { success: false }
+		})
 
-	try {
-		await apply()
-	} catch (error: unknown) {
-		return fail(`  ${String(error)}`)
+	// Apply failure rolls back and reports a plain failure; only a fatal
+	// returnToDefault failure (GitError) escapes this workflow.
+	const applied = yield* Effect.result(apply)
+	if (applied._tag === 'Failure') {
+		return yield* fail(`  ${String(applied.failure)}`)
 	}
 
 	// Range-based override syntax is ignored for already-locked packages.
 	// Deleting the lockfile forces a full re-resolution so overrides apply.
-	/* oxlint-disable no-await-in-loop */
 	for (const lockfileName of deleteLockfiles ?? []) {
 		const lockfilePath = `${workDir}/${lockfileName}`
-		const exists = await Bun.file(lockfilePath).exists()
+		const exists = yield* fs
+			.exists(lockfilePath)
+			.pipe(Effect.catch(() => Effect.succeed(false)))
 		if (exists) {
-			unlinkSync(lockfilePath)
-			console.log(
+			yield* fs.remove(lockfilePath).pipe(
+				Effect.mapError(
+					(cause) =>
+						new GitError({
+							operation: 'Git.updateBranch.removeLockfile',
+							cause
+						})
+				)
+			)
+			yield* Effect.logInfo(
 				`  Deleted ${lockfileName} to force re-resolution of overrides`
 			)
 		}
 	}
-	/* oxlint-enable no-await-in-loop */
 
-	console.log('  Running install...')
-	const installResult = await exec({ command: installCommand, cwd: workDir })
+	yield* Effect.logInfo('  Running install...')
+	const installResult = yield* commands.exec(installCommand, { cwd: workDir })
 	if (installResult.exitCode !== 0) {
-		return fail(`  Failed to run install for branch "${branch}"`)
+		return yield* fail(`  Failed to run install for branch "${branch}"`)
 	}
 
-	const { stdout: diffOutput } = await exec({
-		command: ['git', 'diff', '--name-only'],
-		cwd
-	})
-	const changedFiles = diffOutput.split('\n').filter(Boolean)
+	const diffResult = yield* execLogged(['git', 'diff', '--name-only'], cwd)
+	const changedFiles = diffResult.stdout.split('\n').filter(Boolean)
 
 	const expected = new Set(expectedBasenames)
 	const unexpectedFiles = changedFiles.filter(
 		(f) => !expected.has(f.split('/').pop() || f)
 	)
 	if (unexpectedFiles.length > 0) {
-		console.warn(
+		yield* Effect.logWarning(
 			`  Warning: install modified unexpected files: ${unexpectedFiles.join(', ')}`
 		)
 	}
 
-	await exec({
-		command: ['git', 'add', ...affectedFiles, ...changedFiles],
+	yield* commands.exec(['git', 'add', ...affectedFiles, ...changedFiles], {
 		cwd
 	})
 
 	// --no-verify: skip pre-commit hooks since this is an automated action
-	const commitResult = await exec({
-		command: ['git', 'commit', '--no-verify', '-m', title],
-		cwd
-	})
+	const commitResult = yield* commands.exec(
+		['git', 'commit', '--no-verify', '-m', title],
+		{ cwd }
+	)
 	if (commitResult.exitCode !== 0) {
-		return fail(`  Failed to commit for branch "${branch}"`)
+		return yield* fail(`  Failed to commit for branch "${branch}"`)
 	}
 
-	const pushResult = await exec({
-		command: ['git', 'push', `--force-with-lease=${branch}`, 'origin', branch],
-		cwd
-	})
+	const pushResult = yield* commands.exec(
+		['git', 'push', `--force-with-lease=${branch}`, 'origin', branch],
+		{ cwd }
+	)
 	if (pushResult.exitCode !== 0) {
-		return fail(`  Failed to push branch "${branch}"`)
+		return yield* fail(`  Failed to push branch "${branch}"`)
 	}
 
-	await returnToDefault({ defaultBranch: config.defaultBranch, cwd })
+	yield* returnToDefault({ defaultBranch: config.defaultBranch, cwd })
 	return { success: true }
-}
+})
 
 // ---------------------------------------------------------------------------
 // Auto-merge
@@ -473,7 +503,7 @@ async function updateBranch({
  * such checks there is nothing to wait for, so GitHub refuses to arm it. A
  * failure here is never fatal, because the PR is already open.
  */
-async function enableAutoMerge({
+const enableAutoMerge = Effect.fn('Git.enableAutoMerge')(function* ({
 	prRef,
 	config,
 	dir
@@ -481,47 +511,45 @@ async function enableAutoMerge({
 	prRef: string
 	config: Config
 	dir: DirectoryContext
-}): Promise<boolean> {
-	const result = await exec({
-		command: [
-			'gh',
-			'pr',
-			'merge',
-			prRef,
-			'--auto',
-			`--${config.autoMerge.mergeMethod}`
-		],
-		cwd: dir.cwd
-	})
+}) {
+	const commands = yield* Commands
+	const result = yield* commands.exec(
+		['gh', 'pr', 'merge', prRef, '--auto', `--${config.autoMerge.mergeMethod}`],
+		{ cwd: dir.cwd }
+	)
 
 	if (result.exitCode === 0) {
-		console.log(`  Auto-merge enabled (${config.autoMerge.mergeMethod})`)
+		yield* Effect.logInfo(
+			`  Auto-merge enabled (${config.autoMerge.mergeMethod})`
+		)
 		return true
 	}
 
-	console.warn(`  Warning: could not enable auto-merge for ${prRef}`)
+	yield* Effect.logWarning(
+		`  Warning: could not enable auto-merge for ${prRef}`
+	)
 
 	if (result.stderr.includes('Auto-merge is not allowed')) {
-		console.warn(
+		yield* Effect.logWarning(
 			'  Enable "Allow auto-merge" in repository Settings > General > Pull Requests.'
 		)
 	} else if (result.stderr.includes('clean status')) {
-		console.warn(
+		yield* Effect.logWarning(
 			`  Nothing blocks this PR, so auto-merge has nothing to wait for. Add required status checks to "${config.defaultBranch}", otherwise autoMerge lands updates unchecked.`
 		)
 	} else if (
 		result.stderr.includes('merging is not allowed') ||
 		result.stderr.includes('Merge commits are not allowed')
 	) {
-		console.warn(
+		yield* Effect.logWarning(
 			`  The "${config.autoMerge.mergeMethod}" merge method is disabled for this repository. Allow it, or pick another autoMerge.mergeMethod.`
 		)
 	}
 
 	return false
-}
+})
 
-export async function createPr({
+export const createPr = Effect.fn('Git.createPr')(function* ({
 	branchUpdate,
 	config,
 	dir
@@ -529,16 +557,17 @@ export async function createPr({
 	branchUpdate: BranchUpdate
 	config: Config
 	dir: DirectoryContext
-}): Promise<boolean> {
-	console.log(`\n  Creating PR for branch "${branchUpdate.branch}"`)
+}) {
+	yield* Effect.logInfo(`\n  Creating PR for branch "${branchUpdate.branch}"`)
 
-	const result = await updateBranch({ branchUpdate, config, dir })
+	const result = yield* updateBranch({ branchUpdate, config, dir })
 	if (!result.success) {
 		return false
 	}
 
-	const prResult = await exec({
-		command: [
+	const commands = yield* Commands
+	const prResult = yield* commands.exec(
+		[
 			'gh',
 			'pr',
 			'create',
@@ -551,38 +580,40 @@ export async function createPr({
 			'--body',
 			branchUpdate.body
 		],
-		cwd: dir.cwd
-	})
+		{ cwd: dir.cwd }
+	)
 
 	if (prResult.exitCode === 0) {
-		console.log(`  PR created: ${prResult.stdout}`)
+		yield* Effect.logInfo(`  PR created: ${prResult.stdout}`)
 		if (config.autoMerge.enabled) {
 			// gh prints the new PR's URL, which beats a second branch lookup.
 			const prRef = prResult.stdout.startsWith('https://')
 				? prResult.stdout
 				: branchUpdate.branch
-			await enableAutoMerge({ prRef, config, dir })
+			yield* enableAutoMerge({ prRef, config, dir })
 		}
 	} else {
-		console.error(`  Failed to create PR for branch "${branchUpdate.branch}"`)
+		yield* Effect.logError(
+			`  Failed to create PR for branch "${branchUpdate.branch}"`
+		)
 		if (
 			prResult.stderr.includes(
 				'not permitted to create or approve pull requests'
 			)
 		) {
-			console.error(
+			yield* Effect.logError(
 				'  Enable "Allow GitHub Actions to create and approve pull requests" in repository Settings > Actions > General > Workflow permissions.'
 			)
-			console.error(
+			yield* Effect.logError(
 				'  If the checkbox is disabled, an organization admin must first enable it in Organization Settings > Actions > General > Workflow permissions.'
 			)
 		}
 	}
 
 	return prResult.exitCode === 0
-}
+})
 
-export async function syncExistingPrs({
+export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 	existingPrs,
 	resolveBranchUpdate,
 	isBranchOutdated,
@@ -598,20 +629,28 @@ export async function syncExistingPrs({
 	}) => boolean
 	config: Config
 	dir: DirectoryContext
-}): Promise<{ closedCount: number; rebuiltCount: number }> {
+}) {
 	if (existingPrs.length === 0) {
-		console.log('  No existing PRs to sync')
+		yield* Effect.logInfo('  No existing PRs to sync')
 		return { closedCount: 0, rebuiltCount: 0 }
 	}
 
-	console.log(`  Syncing ${existingPrs.length} existing PR(s)`)
+	yield* Effect.logInfo(`  Syncing ${existingPrs.length} existing PR(s)`)
 
-	const nonBotResults = new Map<number, boolean>()
-	await Promise.all(
-		existingPrs.map(async (pr) => {
-			nonBotResults.set(pr.number, await hasNonBotCommits({ pr, cwd: dir.cwd }))
-		})
+	// Commit authorship checks are independent read-only queries, so they run
+	// concurrently ahead of the sequential sync loop.
+	const nonBotFlags = yield* Effect.forEach(
+		existingPrs,
+		(pr) => hasNonBotCommits({ pr, cwd: dir.cwd }),
+		{ concurrency: 'unbounded' }
 	)
+	const nonBotResults = new Map<number, boolean>()
+	for (const [index, pr] of existingPrs.entries()) {
+		const flag = nonBotFlags[index]
+		if (flag !== undefined) {
+			nonBotResults.set(pr.number, flag)
+		}
+	}
 
 	let closedCount = 0
 	let rebuiltCount = 0
@@ -619,10 +658,9 @@ export async function syncExistingPrs({
 	// Each iteration mutates the shared working tree (git checkout, install,
 	// commit, push) and can touch the same branches as the others, so PRs must
 	// be processed one at a time rather than in parallel.
-	/* oxlint-disable no-await-in-loop */
 	for (const pr of existingPrs) {
 		if (nonBotResults.get(pr.number)) {
-			console.log(
+			yield* Effect.logInfo(
 				`  Skipping PR #${pr.number} — has human-authored content commits`
 			)
 			continue
@@ -631,9 +669,12 @@ export async function syncExistingPrs({
 		const branchUpdate = resolveBranchUpdate(pr.headRefName)
 
 		if (!branchUpdate) {
-			console.log(`  Closing stale PR #${pr.number} — no longer needed`)
-			const closeResult = await exec({
-				command: [
+			yield* Effect.logInfo(
+				`  Closing stale PR #${pr.number} — no longer needed`
+			)
+			const commands = yield* Commands
+			const closeResult = yield* commands.exec(
+				[
 					'gh',
 					'pr',
 					'close',
@@ -641,46 +682,47 @@ export async function syncExistingPrs({
 					'--comment',
 					'Closing: all packages in this group are already up to date.'
 				],
-				cwd: dir.cwd
-			})
+				{ cwd: dir.cwd }
+			)
 			if (closeResult.exitCode === 0) {
 				closedCount++
 			}
 			continue
 		}
 
-		const mergeable = await resolveMergeableState({ pr, cwd: dir.cwd })
+		const mergeable = yield* resolveMergeableState({ pr, cwd: dir.cwd })
 		const isConflicting = mergeable === 'CONFLICTING'
-		const behindDefault =
-			!isConflicting &&
-			(await isBranchBehindDefault({
+		let behindDefault = false
+		if (!isConflicting) {
+			behindDefault = yield* isBranchBehindDefault({
 				branch: pr.headRefName,
 				defaultBranch: config.defaultBranch,
 				cwd: dir.cwd
-			}))
+			})
+		}
 
 		let hasContentChanges = false
 		if (!isConflicting && !behindDefault) {
 			const branchFiles = new Map<string, string | null>()
 			for (const relPath of branchUpdate.affectedFiles) {
-				branchFiles.set(
+				const content = yield* readBranchFile({
+					branch: pr.headRefName,
 					relPath,
-					await readBranchFile({
-						branch: pr.headRefName,
-						relPath,
-						cwd: dir.cwd
-					})
-				)
+					cwd: dir.cwd
+				})
+				branchFiles.set(relPath, content)
 			}
 			hasContentChanges = isBranchOutdated({ branchUpdate, branchFiles })
 		}
 
 		if (!isConflicting && !behindDefault && !hasContentChanges) {
-			console.log(`  PR #${pr.number} (${pr.headRefName}) is up to date`)
+			yield* Effect.logInfo(
+				`  PR #${pr.number} (${pr.headRefName}) is up to date`
+			)
 			// Re-arm rather than skip: this picks up PRs opened before autoMerge
 			// was turned on, and retries any earlier attempt that failed.
 			if (config.autoMerge.enabled) {
-				await enableAutoMerge({ prRef: String(pr.number), config, dir })
+				yield* enableAutoMerge({ prRef: String(pr.number), config, dir })
 			}
 			continue
 		}
@@ -691,53 +733,60 @@ export async function syncExistingPrs({
 		} else if (behindDefault) {
 			reason = `behind ${config.defaultBranch}`
 		}
-		console.log(
+		yield* Effect.logInfo(
 			`\n  Rebuilding PR #${pr.number} (${pr.headRefName}) — ${reason}`
 		)
 
-		try {
-			const result = await updateBranch({ branchUpdate, config, dir })
-			if (!result.success) {
-				console.error(
-					`  Failed to rebuild PR #${pr.number} (${pr.headRefName})`
-				)
-				continue
-			}
+		// A fatal checkout failure while rebuilding must not abort the whole
+		// sync; log it and move on to the next PR.
+		const result = yield* updateBranch({ branchUpdate, config, dir }).pipe(
+			Effect.catch((error) =>
+				Effect.logError(
+					`  Error rebuilding PR #${pr.number} (${pr.headRefName}): ${String(error)}`
+				).pipe(Effect.as<'fatal'>('fatal'))
+			)
+		)
+		if (result === 'fatal') {
+			continue
+		}
+		if (!result.success) {
+			yield* Effect.logError(
+				`  Failed to rebuild PR #${pr.number} (${pr.headRefName})`
+			)
+			continue
+		}
 
-			const editResult = await exec({
-				command: [
-					'gh',
-					'pr',
-					'edit',
-					String(pr.number),
-					'--title',
-					branchUpdate.title,
-					'--body',
-					branchUpdate.body
-				],
-				cwd: dir.cwd
-			})
+		const commands = yield* Commands
+		const editResult = yield* commands.exec(
+			[
+				'gh',
+				'pr',
+				'edit',
+				String(pr.number),
+				'--title',
+				branchUpdate.title,
+				'--body',
+				branchUpdate.body
+			],
+			{ cwd: dir.cwd }
+		)
 
-			if (editResult.exitCode !== 0) {
-				console.warn(
-					`  Warning: Failed to update title/body for PR #${pr.number}, but branch was rebuilt`
-				)
-			}
-
-			// The rebuild force-pushes the branch, so arm the PR again.
-			if (config.autoMerge.enabled) {
-				await enableAutoMerge({ prRef: String(pr.number), config, dir })
-			}
-
-			console.log(`  Successfully rebuilt PR #${pr.number} (${pr.headRefName})`)
-			rebuiltCount++
-		} catch (error: unknown) {
-			console.error(
-				`  Error rebuilding PR #${pr.number} (${pr.headRefName}): ${String(error)}`
+		if (editResult.exitCode !== 0) {
+			yield* Effect.logWarning(
+				`  Warning: Failed to update title/body for PR #${pr.number}, but branch was rebuilt`
 			)
 		}
+
+		// The rebuild force-pushes the branch, so arm the PR again.
+		if (config.autoMerge.enabled) {
+			yield* enableAutoMerge({ prRef: String(pr.number), config, dir })
+		}
+
+		yield* Effect.logInfo(
+			`  Successfully rebuilt PR #${pr.number} (${pr.headRefName})`
+		)
+		rebuiltCount++
 	}
-	/* oxlint-enable no-await-in-loop */
 
 	return { closedCount, rebuiltCount }
-}
+})

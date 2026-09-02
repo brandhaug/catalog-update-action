@@ -1,3 +1,4 @@
+import { Schema, type Effect, type FileSystem } from 'effect'
 import { type ParsedCatalog, type ProviderId } from './providers'
 import { type Severity } from './schemas'
 export type { Severity } from './schemas'
@@ -62,6 +63,15 @@ export type DirectoryContext = {
 // Generic PR abstraction
 // ---------------------------------------------------------------------------
 
+/** Failure produced while writing an update into the working tree. */
+export class BranchApplyError extends Schema.TaggedError<BranchApplyError>()(
+	'BranchApplyError',
+	{
+		operation: Schema.String,
+		cause: Schema.Defect()
+	}
+) {}
+
 export type BranchUpdate = {
 	branch: string
 	title: string
@@ -75,8 +85,7 @@ export type BranchUpdate = {
 	 */
 	expectedBasenames: Array<string>
 	/** Writes the update into the checked-out working tree. */
-	apply: () => Promise<void>
-	/**
+	apply: Effect.Effect<void, BranchApplyError, FileSystem.FileSystem> /**
 	 * Lockfiles (workDir-relative) to delete before running install, forcing
 	 * full re-resolution. Needed for override branches because range-based
 	 * overrides are ignored for already-locked packages.

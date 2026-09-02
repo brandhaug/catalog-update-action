@@ -6,6 +6,8 @@ GitHub Action + CLI (`catalog-update`) that automates dependency updates for the
 
 Runs directly from `src/` via Bun — no build step. Published to npm as `catalog-update-action`; requires **Bun >= 1.4.0**. The action is dogfooded by this repo's own `.github/workflows/catalog-update.yml` (`uses: ./`, daily schedule).
 
+The codebase is written in **Effect v4** (`effect@4.0.0-rc` + `@effect/platform-bun`, pinned exact): workflows are `Effect.gen`/`Effect.fn`, errors are typed `Schema.TaggedError`s, and all I/O goes through services — `Commands` (git/gh/install/audit via `ChildProcessSpawner`), `FileSystem`, `Registry` (npm/GitHub HTTP via `HttpClient`), with a plain-text `Logger` layer so CLI output stays human-readable. zod is gone; every boundary is decoded with Effect `Schema` (`Schema.decodeUnknownResult`/`Option`/`Effect`). Providers (`src/providers/`) stay deliberately pure string→string functions; their throws are mapped into `BranchApplyError` by the apply adapters.
+
 ## Commands
 
 ```sh
@@ -22,12 +24,17 @@ Entry point: `src/main.ts`.
 
 ## Linting & Formatting
 
-oxlint (type-aware) + oxfmt, configured in `.oxlintrc.json` / `.oxfmtrc.json`. Formatting is enforced by a pre-commit hook (`.githooks/`, enabled by the `prepare` script) that auto-fixes fmt + lint on commit. CI enforces `bun run lint` and `bun test` on PRs.
+oxlint (type-aware) + oxfmt, configured in `.oxlintrc.json` / `.oxfmtrc.json`. The Effect plugin (`oxlint-plugin-effect`) enforces Effect discipline (typed errors, no try/catch, no `new Error`, no globals in application code), with documented per-path exemptions for the process boundary (`src/main.ts`), the logger, the provider throw contract, and test fixtures. Formatting is enforced by a pre-commit hook (`.githooks/`, enabled by the `prepare` script) that auto-fixes fmt + lint on commit. CI enforces `bun run lint` and `bun test` on PRs.
 
 ## Project Structure
 
 ```
 src/                       # TypeScript source (entry: main.ts)
+src/commands.ts            # Commands service — exec adapter over ChildProcessSpawner (silent; exit code is data)
+src/logging.ts             # Plain-text logger layer (info→stdout, warn/error→stderr)
+src/registry.ts            # Registry service — npm registry + GitHub releases over HttpClient, plus pure release-age helpers
+src/git.ts, src/audit.ts   # git/gh and audit workflows over Commands + FileSystem
+src/pipeline.ts            # processCatalog — per-location orchestration
 src/providers/             # Per-manager catalog adapters (bun, pnpm, yarn) — parsing, install, audit capability
 test/                      # bun:test tests, mirror src/ names (src/catalog.ts -> test/catalog.test.ts)
 action.yml                 # GitHub Action definition (composite; inputs: config, dry-run, token, exclude-directories, bun-version)
