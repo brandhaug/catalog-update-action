@@ -4,6 +4,7 @@ import {
   compareSemver,
   extractVersionFromTag,
   getIntermediateVersions,
+  highestVersionWhere,
   matchesAnyPattern,
   matchesGlob,
   parseSemver
@@ -286,5 +287,37 @@ describe('getIntermediateVersions', () => {
       latestVersion: '1.0.0'
     })
     expect(result).toEqual(['1.0.0'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// highestVersionWhere
+// ---------------------------------------------------------------------------
+
+describe('highestVersionWhere', () => {
+  test('returns the highest qualifying version', () => {
+    const best = highestVersionWhere(
+      ['1.0.0', '1.2.0', '1.10.0', '1.9.0'],
+      () => true
+    )
+    expect(best).toBe('1.10.0')
+  })
+
+  test('returns null when nothing qualifies', () => {
+    expect(highestVersionWhere(['1.0.0', '2.0.0'], () => false)).toBeNull()
+    expect(highestVersionWhere([], () => true)).toBeNull()
+  })
+
+  test('compares prereleases per semver ordering', () => {
+    const best = highestVersionWhere(
+      ['2.0.0-beta.1', '2.0.0-rc.1', '2.0.0-alpha.9'],
+      () => true
+    )
+    expect(best).toBe('2.0.0-rc.1')
+  })
+
+  test('prefers a release over a prerelease at the same core version', () => {
+    const best = highestVersionWhere(['2.0.0-rc.1', '2.0.0', '1.9.0'], () => true)
+    expect(best).toBe('2.0.0')
   })
 })

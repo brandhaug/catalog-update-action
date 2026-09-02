@@ -45,6 +45,7 @@
     "@types/bun": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
+    "oxlint-plugin-effect": "0.12.0",
     "oxlint-tsgolint": "catalog:",
     "ultracite": "7.10.6"
   },
@@ -60,7 +61,8 @@
   "packageManager": "bun@1.4.0",
   "workspaces": [],
   "dependencies": {
-    "yaml": "2.9.0",
-    "zod": "4.4.3"
+    "@effect/platform-bun": "4.0.0-rc.112",
+    "effect": "4.0.0-rc.112",
+    "yaml": "2.9.0"
   }
 }

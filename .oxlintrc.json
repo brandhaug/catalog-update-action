@@ -24,7 +24,12 @@
       // the specifier has to be a path.
       "name": "anti-slop",
       "specifier": "./node_modules/ultracite/config/oxlint/anti-slop/plugin.mjs"
-    }
+    },
+    // Effect discipline (oxlint-plugin-effect). The whole codebase runs on
+    // Effect v4, so the plugin's judgment applies everywhere: errors go in
+    // the Effect error channel (Schema.TaggedError), not in `new Error`;
+    // concurrency, time and environment go through services, not globals.
+    "oxlint-plugin-effect/plugin"
   ],
   "options": {
     // Type-aware linting for bare `oxlint` runs too, matching the
@@ -150,9 +155,16 @@
     "typescript/no-unsafe-declaration-merging": "error",
     "typescript/no-unsafe-function-type": "error",
     "typescript/no-wrapper-object-types": "error",
-    // prefer-as-const stays on: the repo uses literal types like `'^' | '~' | ''`
-    // and `as const` on its range-prefix literals. There is no competing rule.
-    "typescript/prefer-as-const": "error",
+    // prefer-as-const is off because it contradicts `effect/noAs`. Given
+    // `const x: 'queued' = 'queued'`, prefer-as-const demands `as const`, and
+    // noAs then rejects the result. noAs is the rule with the stronger claim,
+    // so it wins.
+    "typescript/prefer-as-const": "off",
+    // no-unnecessary-type-arguments is off: it fights Effect's convention of
+    // spelling out the channels. `Effect.Effect<A, unknown, never>` says "no
+    // requirements" to the reader; collapsing type arguments to defaults makes
+    // an Effect signature harder to read, not easier.
+    "typescript/no-unnecessary-type-arguments": "off",
     "typescript/prefer-literal-enum-member": "error",
     "typescript/prefer-namespace-keyword": "error",
     // Type-aware: `async` functions that never await are just promises that
@@ -207,10 +219,11 @@
     "typescript/use-unknown-in-catch-callback-variable": "error",
     "typescript/no-unnecessary-template-expression": "error",
     "typescript/no-deprecated": "error",
-    // consistent-return is on: the two switch-based helpers in git.ts are the
-    // only current hits, and a throwing `default` makes them exhaustive.
-    "typescript/consistent-return": "error",
-    "typescript/no-unnecessary-type-arguments": "error",
+    // consistent-return is off: `return yield* new SomeError({ ... })` is the
+    // shape of every typed early-exit in Effect code, and the rule would
+    // demand a bare `return` after each one, buying nothing. The error channel
+    // is exhaustive by type; the rule cannot see that.
+    "typescript/consistent-return": "off",
     // The one void-expression style that matters here is the arrow shorthand
     // (`() => setX(1)`), which is idiomatic, not a confusion.
     "typescript/no-confusing-void-expression": [
@@ -354,10 +367,42 @@
     "promise/spec-only": "error",
     "promise/valid-params": "error",
 
+    // --- Effect (oxlint-plugin-effect) -------------------------------------
+    // The rule set this repo runs for Effect-native code: errors in the typed
+    // channel (Schema.TaggedError, never `new Error`), Effect.fn for every
+    // effectful function, services over globals. The full plugin `recommended`
+    // preset carries more members; these are the ones this repo adopts, the
+    // same set as the config this lint policy was modeled on. `noNullish` is
+    // excluded there and here: it bans `null`/`undefined` outright, which
+    // contradicts Effect v4 schema guidance (Schema.optionalKey / NullOr /
+    // UndefinedOr are legitimate contracts).
+    "effect/noAs": "error",
+    "effect/noAsyncFunction": "error",
+    "effect/noDynamicImports": "error",
+    "effect/noEffectBind": "error",
+    "effect/noEffectDo": "error",
+    "effect/noGlobals": "error",
+    "effect/noNewError": "error",
+    "effect/noNewPromise": "error",
+    "effect/noNodeBuiltinImport": "error",
+    "effect/noTestLifecycleHooks": "error",
+    "effect/noThrowStatement": "error",
+    "effect/noTryCatch": "error",
+    "effect/preferEffectFn": "error",
+    // noTernary is the one rule of the adopted set that is off, repo-wide.
+    // This is a CLI: narration and small data decisions are spelled as
+    // conditional expressions (`dryRun ? 'DRY RUN' : 'LIVE'`, `dir === '.' ?
+    // cwd : ...`). Rewriting each as if/let or Match.value buries the message
+    // text and the branch under ceremony; the rule earns its keep in Effect
+    // service logic, not in log lines, and this repo is nearly all log lines
+    // around a single Effect program.
+    "effect/noTernary": "off",
+
+    // _tag is the Effect-wide discriminant field; the underscore is convention,
+    // not a private marker. Every other dangling underscore stays an error.
+    "no-underscore-dangle": ["error", { "allow": ["_tag"] }],
+
     // --- anti-slop (vendored by ultracite) ---------------------------------
-    // The same rule family the strict config elsewhere turns on. Combined with
-    // zod for boundary parsing, the codebase has almost no type assertions or
-    // runtime typeof probes left, so these rules mostly act as a tripwire.
     "anti-slop/no-chained-type-assertions": "error",
     "anti-slop/no-conditional-empty-object-spread": "error",
     "anti-slop/no-known-value-widening": "error",
@@ -382,20 +427,35 @@
   },
   "overrides": [
     {
-      // src/registry.ts is the network boundary of this CLI: its error normalizer
-      // is the one place an unknown rejection is narrowed into a message, and
-      // reading `.stack` off an `Error` is the entire point of that boundary.
-      "files": ["src/registry.ts"],
+      // src/main.ts is the process boundary: argument parsing runs before any
+      // Effect runtime exists (help/version exit the process directly), and
+      // the entry point awaits one runPromise to derive the process exit
+      // code. The Effect guidance scopes `Config` and services to
+      // application logic, and the noGlobals rule itself says platform
+      // adapters may switch it off — a CLI's main() is that adapter. The
+      // noAsyncFunction hit (the single async entry arrow) is suppressed
+      // inline at the site instead.
+      "files": ["src/main.ts"],
       "rules": {
-        "unicorn/no-instanceof-builtins": "off"
+        "effect/noGlobals": "off"
       }
     },
     {
       // Tests: assertions on `result[0]!` are the idiomatic way to read a
-      // known-present index under noUncheckedIndexedAccess.
+      // known-present index under noUncheckedIndexedAccess. Fixtures write
+      // real temp files with node:fs and drive Bun runtime APIs directly, and
+      // setup/teardown hooks are how bun:test scopes fixtures — none of that
+      // is application code.
       "files": ["test/**"],
       "rules": {
-        "typescript/no-non-null-assertion": "off"
+        "typescript/no-non-null-assertion": "off",
+        "effect/noTestLifecycleHooks": "off",
+        "effect/noAsyncFunction": "off",
+        "effect/noNodeBuiltinImport": "off",
+        "effect/noGlobals": "off",
+        "effect/noTryCatch": "off",
+        "effect/noThrowStatement": "off",
+        "effect/noNewError": "off"
       }
     }
   ]

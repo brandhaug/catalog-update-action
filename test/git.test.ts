@@ -1,15 +1,15 @@
 import { describe, expect, test, afterAll } from 'bun:test'
+import { Effect } from 'effect'
+import { BunFileSystem } from '@effect/platform-bun'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits } from '../src/git'
 import { type CatalogLocation, type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
-const [bunTestDir, missingTestDir, pnpmTestDir] = [
-  'git-test-bun-',
-  'git-test-missing-',
-  'git-test-pnpm-'
-].map((prefix) => mkdtempSync(join(tmpdir(), prefix)))
+const bunTestDir = mkdtempSync(join(tmpdir(), 'git-test-bun-'))
+const missingTestDir = mkdtempSync(join(tmpdir(), 'git-test-missing-'))
+const pnpmTestDir = mkdtempSync(join(tmpdir(), 'git-test-pnpm-'))
 
 const TEST_DIRS = [bunTestDir, missingTestDir, pnpmTestDir]
 
@@ -171,14 +171,14 @@ describe('buildCatalogBranchUpdate', () => {
       releaseNotes: new Map()
     })
 
-    await result.apply()
+    await Effect.runPromise(result.apply.pipe(Effect.provide(BunFileSystem.layer)))
 
     const pkg = await Bun.file(`${workDir}/package.json`).json()
     expect(pkg.catalog).toEqual({ react: '19.0.0', zod: '3.0.0' })
     expect(pkg.name).toBe('root')
   })
 
-  test('apply throws when the catalog is missing', async () => {
+  test('apply fails with a BranchApplyError when the catalog is missing', async () => {
     const workDir = missingTestDir
     await Bun.write(`${workDir}/package.json`, JSON.stringify({ name: 'root' }))
 
@@ -192,13 +192,11 @@ describe('buildCatalogBranchUpdate', () => {
       releaseNotes: new Map()
     })
 
-    let applyError: unknown
-    try {
-      await result.apply()
-    } catch (error: unknown) {
-      applyError = error
-    }
-    expect(String(applyError)).toContain('No catalog "default" found')
+    const error = await Effect.runPromise(
+      Effect.flip(result.apply.pipe(Effect.provide(BunFileSystem.layer)))
+    )
+    expect(error._tag).toBe('BranchApplyError')
+    expect(String(error.cause)).toContain('No catalog "default" found')
   })
 
   test('appends titleSuffix for single package in working directory', () => {
@@ -280,7 +278,7 @@ describe('buildCatalogBranchUpdate', () => {
     expect(result.affectedFiles).toEqual(['pnpm-workspace.yaml'])
     expect(result.installCommand).toEqual(['pnpm', 'install'])
 
-    await result.apply()
+    await Effect.runPromise(result.apply.pipe(Effect.provide(BunFileSystem.layer)))
 
     const content = await Bun.file(`${workDir}/pnpm-workspace.yaml`).text()
     expect(content).toContain('react: ^19.0.0')

@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { Effect, Layer, Logger } from 'effect'
+import { BunFileSystem } from '@effect/platform-bun'
+import { type Config } from '../src/types'
 import { loadConfig, parseAuditConfig, parseAutoMergeConfig } from '../src/config'
 import { join } from 'node:path'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -20,9 +23,30 @@ async function writeTempConfig(content: string): Promise<string> {
   return configPath
 }
 
+/** Run loadConfig against the real Bun filesystem, collecting log output. */
+async function runLoadConfig(
+  configPath: string
+): Promise<{ config: Config; messages: Array<string> }> {
+  const messages: Array<string> = []
+  const captureLayer = Logger.layer([
+    Logger.make((options) => {
+      const parts = Array.isArray(options.message)
+        ? options.message.map(String)
+        : [String(options.message)]
+      messages.push(parts.join(' '))
+    })
+  ])
+  const config = await Effect.runPromise(
+    loadConfig({ configPath }).pipe(
+      Effect.provide(Layer.mergeAll(BunFileSystem.layer, captureLayer))
+    )
+  )
+  return { config, messages }
+}
+
 describe('loadConfig', () => {
   test('returns defaults when file does not exist', async () => {
-    const config = await loadConfig({ configPath: '/nonexistent/.catalog-updaterc.json' })
+    const { config } = await runLoadConfig('/nonexistent/.catalog-updaterc.json')
 
     expect(config.branchPrefix).toBe('catalog-update')
     expect(config.defaultBranch).toBe('master')
@@ -49,7 +73,7 @@ describe('loadConfig', () => {
       ]
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.branchPrefix).toBe('deps')
     expect(config.defaultBranch).toBe('main')
@@ -67,7 +91,7 @@ describe('loadConfig', () => {
       defaultBranch: 'main'
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.branchPrefix).toBe('catalog-update')
     expect(config.defaultBranch).toBe('main')
@@ -81,20 +105,10 @@ describe('loadConfig', () => {
       defaultBranch: 'main'
     }))
 
-    const warnings: Array<string> = []
-    const originalWarn = console.warn
-    console.warn = (message: string) => {
-      warnings.push(message)
-    }
+    const { config, messages } = await runLoadConfig(configPath)
 
-    try {
-      const config = await loadConfig({ configPath })
-      expect(config.defaultBranch).toBe('main')
-    } finally {
-      console.warn = originalWarn
-    }
-
-    expect(warnings.some((w) => w.includes('packageManager'))).toBe(true)
+    expect(config.defaultBranch).toBe('main')
+    expect(messages.some((w) => w.includes('packageManager'))).toBe(true)
   })
 
   test('filters invalid updateTypes', async () => {
@@ -104,7 +118,7 @@ describe('loadConfig', () => {
       ]
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.groups[0]?.updateTypes).toEqual(['major', 'patch'])
   })
@@ -116,7 +130,7 @@ describe('loadConfig', () => {
       ]
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.groups[0]?.updateTypes).toEqual(['prerelease', 'patch'])
   })
@@ -128,7 +142,7 @@ describe('loadConfig', () => {
       ]
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.groups[0]?.updateTypes).toEqual(['release', 'patch'])
   })
@@ -143,7 +157,7 @@ describe('loadConfig', () => {
       ]
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.groups).toHaveLength(1)
     expect(config.groups[0]?.name).toBe('valid')
@@ -154,7 +168,7 @@ describe('loadConfig', () => {
       audit: { enabled: true, minimumSeverity: 'high' }
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.audit.enabled).toBe(true)
     expect(config.audit.minimumSeverity).toBe('high')
@@ -165,7 +179,7 @@ describe('loadConfig', () => {
       audit: { enabled: true }
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.audit.enabled).toBe(true)
     expect(config.audit.minimumSeverity).toBe('moderate')
@@ -176,7 +190,7 @@ describe('loadConfig', () => {
       minReleaseAgeDays: 7
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.minReleaseAgeDays).toBe(7)
   })
@@ -184,7 +198,7 @@ describe('loadConfig', () => {
   test('defaults minReleaseAgeDays to 0 when missing', async () => {
     const configPath = await writeTempConfig(JSON.stringify({}))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.minReleaseAgeDays).toBe(0)
   })
@@ -194,7 +208,7 @@ describe('loadConfig', () => {
       minReleaseAgeDays: -5
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.minReleaseAgeDays).toBe(0)
   })
@@ -204,7 +218,7 @@ describe('loadConfig', () => {
       minReleaseAgeDays: 3.5
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.minReleaseAgeDays).toBe(0)
   })
@@ -214,7 +228,7 @@ describe('loadConfig', () => {
       minReleaseAgeDays: 'three'
     }))
 
-    const config = await loadConfig({ configPath })
+    const { config } = await runLoadConfig(configPath)
 
     expect(config.minReleaseAgeDays).toBe(0)
   })

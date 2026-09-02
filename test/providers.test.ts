@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { getProvider, PROVIDERS } from '../src/providers'
+import { getProvider, PROVIDERS, type ProviderId } from '../src/providers'
 import { type OverrideEntry, type UpdateCandidate } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
@@ -175,10 +175,12 @@ describe('bun provider', () => {
 // pnpm + yarn (shared YAML implementation)
 // ---------------------------------------------------------------------------
 
-describe.each([
+const YAML_PROVIDERS: Array<[ProviderId, string]> = [
   ['pnpm', 'pnpm-workspace.yaml'],
   ['yarn', '.yarnrc.yml']
-] as const)('%s provider (YAML)', (id, fileName) => {
+]
+
+describe.each(YAML_PROVIDERS)('%s provider (YAML)', (id, fileName) => {
   const provider = getProvider(id)
 
   test('parses default and named catalogs', () => {
@@ -489,7 +491,8 @@ describe('audit capabilities', () => {
   })
 
   test('bun and pnpm keys overrides by name@range', () => {
-    for (const id of ['bun', 'pnpm'] as const) {
+    const rangeKeyedProviders: Array<ProviderId> = ['bun', 'pnpm']
+    for (const id of rangeKeyedProviders) {
       const audit = PROVIDERS[id].audit
       expect(audit.overrideKey(minimistOverride)).toBe(
         'minimist@>=1.0.0 <1.2.6'

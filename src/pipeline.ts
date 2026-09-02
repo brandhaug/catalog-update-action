@@ -1,3 +1,5 @@
+import { DateTime, Effect, FileSystem, Option } from 'effect'
+
 import { loadConfig } from './config'
 import { buildCatalogValue, parseCatalog } from './catalog'
 import {
@@ -14,17 +16,9 @@ import {
 } from './git'
 import { getProvider, type ParsedCatalog } from './providers'
 import { shouldIgnore, assignToGroups } from './groups'
-import {
-	queryNpmRegistry,
-	queryPackageMetadata,
-	queryReleaseNotes,
-	filterByReleaseAge
-} from './registry'
-import {
-	classifySemverChange,
-	Semaphore,
-	getOverrideBranchPrefix
-} from './utils'
+import { Registry } from './registry'
+import { filterByReleaseAge } from './release-age'
+import { classifySemverChange, getOverrideBranchPrefix } from './utils'
 import {
 	type BranchUpdate,
 	type CatalogEntry,
@@ -41,6 +35,48 @@ import {
 // Per-catalog pipeline stages
 // ---------------------------------------------------------------------------
 
+/**
+ * Everything the per-location stages share, computed once by processCatalog:
+ * the directory context, the loaded config, the location itself, and the
+ * branch-prefix/title decoration derived from them.
+ */
+type DirectoryRun = {
+	dir: DirectoryContext
+	config: Config
+	location: CatalogLocation
+	titleSuffix: string
+	effectiveBranchPrefix: string
+}
+
+/**
+ * DirectoryRun plus the computed update artifacts (stage 5/5b output) that
+ * the PR sync and creation stages share.
+ */
+type CatalogRun = DirectoryRun & {
+	groups: Map<string, Array<UpdateCandidate>>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
+	overrideBranchUpdate: BranchUpdate | null
+	overrideEntries: Array<OverrideEntry>
+}
+
+/**
+ * The catalog BranchUpdate builder for one run, shared by the sync and
+ * create stages so both derive branches, titles and bodies identically.
+ */
+function makeCatalogBranchBuilder(catalog: CatalogRun) {
+	return (groupName: string, updates: Array<UpdateCandidate>) =>
+		buildCatalogBranchUpdate({
+			groupName,
+			updates,
+			config: catalog.config,
+			location: catalog.location,
+			workDir: catalog.dir.workDir,
+			titleSuffix: catalog.titleSuffix,
+			branchPrefix: catalog.effectiveBranchPrefix,
+			releaseNotes: catalog.releaseNotes
+		})
+}
+
 function buildDirectoryContext({
 	cwd,
 	dir
@@ -54,277 +90,261 @@ function buildDirectoryContext({
 	}
 }
 
-async function loadConfigForDirectory({
-	dir,
-	configPath
-}: {
-	dir: DirectoryContext
-	configPath: string
-}): Promise<Config> {
-	console.log('  Loading config...')
-	const config = await loadConfig({
-		configPath: `${dir.workDir}/${configPath}`
-	})
-	console.log(`    Branch prefix: ${config.branchPrefix}`)
-	console.log(`    Default branch: ${config.defaultBranch}`)
-	console.log(`    Groups: ${config.groups.length}`)
-	console.log(`    Ignore rules: ${config.ignore.length}`)
-	console.log(
-		`    Audit: ${config.audit.enabled ? `enabled (minimum severity: ${config.audit.minimumSeverity})` : 'disabled'}`
-	)
-	if (config.minReleaseAgeDays > 0) {
-		console.log(`    Min release age: ${config.minReleaseAgeDays} day(s)`)
-	}
-	return config
-}
-
-async function findCatalogCandidates({
-	entries,
-	config
-}: {
-	entries: Array<CatalogEntry>
-	config: Config
-}): Promise<Array<UpdateCandidate>> {
-	console.log('  Querying npm registry...')
-	const semaphore = new Semaphore(config.concurrency)
-	const latestVersions = await queryNpmRegistry({ entries, semaphore })
-	console.log(`    Got latest versions for ${latestVersions.size} packages`)
-
-	console.log('  Finding available updates...')
-	const candidates: Array<UpdateCandidate> = []
-
-	for (const entry of entries) {
-		const latest = latestVersions.get(entry.name)
-		if (!latest) {
-			continue
-		}
-
-		const changeType = classifySemverChange({
-			from: entry.currentVersion,
-			to: latest
+const loadConfigForDirectory = Effect.fn('Pipeline.loadConfigForDirectory')(
+	function* ({
+		dir,
+		configPath
+	}: {
+		dir: DirectoryContext
+		configPath: string
+	}) {
+		yield* Effect.logInfo('  Loading config...')
+		const config = yield* loadConfig({
+			configPath: `${dir.workDir}/${configPath}`
 		})
-		if (changeType === null) {
-			continue
-		}
-
-		if (shouldIgnore({ name: entry.name, changeType, rules: config.ignore })) {
-			continue
-		}
-
-		candidates.push({ ...entry, latestVersion: latest, changeType })
-	}
-
-	console.log(`    Found ${candidates.length} packages with updates`)
-	return candidates
-}
-
-async function buildGroupedUpdates({
-	candidates,
-	config
-}: {
-	candidates: Array<UpdateCandidate>
-	config: Config
-}): Promise<{
-	candidates: Array<UpdateCandidate>
-	groups: Map<string, Array<UpdateCandidate>>
-	releaseNotes: Map<string, Array<VersionReleaseNote>>
-}> {
-	const groups = new Map<string, Array<UpdateCandidate>>()
-	const releaseNotes = new Map<string, Array<VersionReleaseNote>>()
-	if (candidates.length === 0) {
-		return { candidates, groups, releaseNotes }
-	}
-
-	console.log('  Fetching package metadata...')
-	const semaphore = new Semaphore(config.concurrency)
-	const packageMetadata = await queryPackageMetadata({ candidates, semaphore })
-	console.log(
-		`    Found metadata for ${packageMetadata.size}/${candidates.length} packages`
-	)
-
-	// Filter by minimum release age (supply chain protection)
-	let remaining = candidates
-	if (config.minReleaseAgeDays > 0) {
-		console.log(
-			`  Filtering by minimum release age (${config.minReleaseAgeDays} day(s))...`
+		yield* Effect.logInfo(`    Branch prefix: ${config.branchPrefix}`)
+		yield* Effect.logInfo(`    Default branch: ${config.defaultBranch}`)
+		yield* Effect.logInfo(`    Groups: ${config.groups.length}`)
+		yield* Effect.logInfo(`    Ignore rules: ${config.ignore.length}`)
+		yield* Effect.logInfo(
+			`    Audit: ${config.audit.enabled ? `enabled (minimum severity: ${config.audit.minimumSeverity})` : 'disabled'}`
 		)
-		const beforeCount = candidates.length
-		remaining = filterByReleaseAge({
+		if (config.minReleaseAgeDays > 0) {
+			yield* Effect.logInfo(
+				`    Min release age: ${config.minReleaseAgeDays} day(s)`
+			)
+		}
+		return config
+	}
+)
+
+const findCatalogCandidates = Effect.fn('Pipeline.findCatalogCandidates')(
+	function* ({
+		entries,
+		config
+	}: {
+		entries: Array<CatalogEntry>
+		config: Config
+	}) {
+		yield* Effect.logInfo('  Querying npm registry...')
+		const registry = yield* Registry
+		const latestVersions = yield* registry.queryNpmRegistry({
+			entries,
+			concurrency: config.concurrency
+		})
+		yield* Effect.logInfo(
+			`    Got latest versions for ${latestVersions.size} packages`
+		)
+
+		yield* Effect.logInfo('  Finding available updates...')
+		const candidates: Array<UpdateCandidate> = []
+
+		for (const entry of entries) {
+			const latest = latestVersions.get(entry.name)
+			if (!latest) {
+				continue
+			}
+
+			const changeType = classifySemverChange({
+				from: entry.currentVersion,
+				to: latest
+			})
+			if (changeType === null) {
+				continue
+			}
+
+			if (
+				shouldIgnore({ name: entry.name, changeType, rules: config.ignore })
+			) {
+				continue
+			}
+
+			candidates.push({ ...entry, latestVersion: latest, changeType })
+		}
+
+		yield* Effect.logInfo(
+			`    Found ${candidates.length} packages with updates`
+		)
+		return candidates
+	}
+)
+
+const buildGroupedUpdates = Effect.fn('Pipeline.buildGroupedUpdates')(
+	function* ({
+		candidates,
+		config
+	}: {
+		candidates: Array<UpdateCandidate>
+		config: Config
+	}) {
+		const groups = new Map<string, Array<UpdateCandidate>>()
+		const releaseNotes = new Map<string, Array<VersionReleaseNote>>()
+		if (candidates.length === 0) {
+			return { candidates, groups, releaseNotes }
+		}
+
+		const registry = yield* Registry
+
+		yield* Effect.logInfo('  Fetching package metadata...')
+		const packageMetadata = yield* registry.queryPackageMetadata({
 			candidates,
-			packageMetadata,
-			minReleaseAgeDays: config.minReleaseAgeDays
+			concurrency: config.concurrency
 		})
-		const skipped = beforeCount - remaining.length
-		if (skipped > 0) {
-			console.log(`    Skipped ${skipped} package(s) due to release age`)
-		}
-	}
-
-	console.log('  Fetching release notes...')
-	const notes = await queryReleaseNotes({
-		candidates: remaining,
-		packageMetadata,
-		semaphore
-	})
-	console.log(
-		`    Found release notes for ${notes.size}/${remaining.length} packages`
-	)
-
-	console.log('  Grouping updates...')
-	const assigned = assignToGroups({
-		candidates: remaining,
-		groups: config.groups
-	})
-
-	const assignedNames = new Set(
-		[...assigned.values()].flat().map((u) => u.name)
-	)
-	const unassigned = remaining.filter((c) => !assignedNames.has(c.name))
-	for (const candidate of unassigned) {
-		const sanitizedName = candidate.name.replace(/^@/, '').replaceAll('/', '-')
-		assigned.set(sanitizedName, [candidate])
-	}
-
-	for (const [groupName, updates] of assigned) {
-		const types = [...new Set(updates.map((u) => u.changeType))].join(', ')
-		console.log(
-			`    ${groupName}: ${updates.map((u) => u.name).join(', ')} (${types})`
+		yield* Effect.logInfo(
+			`    Found metadata for ${packageMetadata.size}/${candidates.length} packages`
 		)
+
+		// Filter by minimum release age (supply chain protection)
+		let remaining = candidates
+		if (config.minReleaseAgeDays > 0) {
+			yield* Effect.logInfo(
+				`  Filtering by minimum release age (${config.minReleaseAgeDays} day(s))...`
+			)
+			const nowUtc = yield* DateTime.now
+			const nowEpochMs = DateTime.toEpochMillis(nowUtc)
+			const beforeCount = candidates.length
+			const result = filterByReleaseAge({
+				candidates,
+				packageMetadata,
+				minReleaseAgeDays: config.minReleaseAgeDays,
+				nowEpochMs
+			})
+			remaining = result.candidates
+			for (const event of result.events) {
+				yield* Effect.logInfo(event.message)
+			}
+			const skipped = beforeCount - remaining.length
+			if (skipped > 0) {
+				yield* Effect.logInfo(
+					`    Skipped ${skipped} package(s) due to release age`
+				)
+			}
+		}
+
+		yield* Effect.logInfo('  Fetching release notes...')
+		const notes = yield* registry.queryReleaseNotes({
+			candidates: remaining,
+			packageMetadata,
+			concurrency: config.concurrency
+		})
+		yield* Effect.logInfo(
+			`    Found release notes for ${notes.size}/${remaining.length} packages`
+		)
+
+		yield* Effect.logInfo('  Grouping updates...')
+		const assigned = assignToGroups({
+			candidates: remaining,
+			groups: config.groups
+		})
+
+		const assignedNames = new Set(
+			[...assigned.values()].flat().map((u) => u.name)
+		)
+		const unassigned = remaining.filter((c) => !assignedNames.has(c.name))
+		for (const candidate of unassigned) {
+			const sanitizedName = candidate.name
+				.replace(/^@/, '')
+				.replaceAll('/', '-')
+			assigned.set(sanitizedName, [candidate])
+		}
+
+		for (const [groupName, updates] of assigned) {
+			const types = [...new Set(updates.map((u) => u.changeType))].join(', ')
+			yield* Effect.logInfo(
+				`    ${groupName}: ${updates.map((u) => u.name).join(', ')} (${types})`
+			)
+		}
+
+		return { candidates: remaining, groups: assigned, releaseNotes: notes }
 	}
+)
 
-	return { candidates: remaining, groups: assigned, releaseNotes: notes }
-}
+const loadExistingOverrides = Effect.fn('Pipeline.loadExistingOverrides')(
+	function* (run: DirectoryRun) {
+		const fs = yield* FileSystem.FileSystem
+		const { audit } = getProvider(run.location.providerId)
+		const content = yield* fs
+			.readFileString(`${run.dir.workDir}/${audit.overrideFile}`)
+			.pipe(Effect.option)
+		if (Option.isNone(content)) {
+			return {}
+		}
+		return audit.readOverrides({ content: content.value }) ?? {}
+	}
+)
 
-async function loadExistingOverrides({
-	dir,
-	providerId
+const findOverrideUpdates = Effect.fn('Pipeline.findOverrideUpdates')(
+	function* ({
+		run,
+		entries
+	}: {
+		run: DirectoryRun
+		entries: Array<CatalogEntry>
+	}) {
+		if (!run.config.audit.enabled) {
+			return { overrideBranchUpdate: null, overrideEntries: [] }
+		}
+
+		const { audit } = getProvider(run.location.providerId)
+
+		yield* Effect.logInfo(`  Running ${run.location.providerId} audit...`)
+		const auditResult = yield* runAudit({ cwd: run.dir.workDir, audit })
+
+		if (Option.isNone(auditResult)) {
+			yield* Effect.logInfo('    Audit unavailable or failed, skipping')
+			return { overrideBranchUpdate: null, overrideEntries: [] }
+		}
+
+		const catalogNames = new Set(entries.map((e) => e.name))
+		const overrideEntries = computeOverrides({
+			auditResult: auditResult.value,
+			catalogNames,
+			minimumSeverity: run.config.audit.minimumSeverity,
+			existingOverrides: yield* loadExistingOverrides(run),
+			audit
+		})
+
+		if (overrideEntries.length === 0) {
+			yield* Effect.logInfo('    No transitive vulnerability overrides needed')
+			return { overrideBranchUpdate: null, overrideEntries }
+		}
+
+		const staleCount = overrideEntries.filter(
+			(e) => e.existingOverrideStale
+		).length
+		const newCount = overrideEntries.length - staleCount
+		const parts: Array<string> = []
+		if (newCount > 0) {
+			parts.push(`${newCount} new`)
+		}
+		if (staleCount > 0) {
+			parts.push(`${staleCount} stale (lockfile not re-resolved)`)
+		}
+		yield* Effect.logInfo(
+			`    Found ${overrideEntries.length} transitive vulnerability override(s): ${parts.join(', ')}`
+		)
+		const overrideBranchUpdate = buildOverrideBranchUpdate({
+			overrides: overrideEntries,
+			branchPrefix: run.effectiveBranchPrefix,
+			titleSuffix: run.titleSuffix,
+			workDir: run.dir.workDir,
+			providerId: run.location.providerId
+		})
+
+		return { overrideBranchUpdate, overrideEntries }
+	}
+)
+
+const syncDirectoryPrs = Effect.fn('Pipeline.syncDirectoryPrs')(function* ({
+	catalog,
+	existingPrs
 }: {
-	dir: DirectoryContext
-	providerId: CatalogLocation['providerId']
-}): Promise<Record<string, string>> {
-	const { audit } = getProvider(providerId)
-	try {
-		const content = await Bun.file(
-			`${dir.workDir}/${audit.overrideFile}`
-		).text()
-		return audit.readOverrides({ content }) ?? {}
-	} catch {
-		return {}
-	}
-}
-
-async function findOverrideUpdates({
-	dir,
-	config,
-	providerId,
-	entries,
-	effectiveBranchPrefix,
-	titleSuffix
-}: {
-	dir: DirectoryContext
-	config: Config
-	providerId: CatalogLocation['providerId']
-	entries: Array<CatalogEntry>
-	effectiveBranchPrefix: string
-	titleSuffix: string
-}): Promise<{
-	overrideBranchUpdate: BranchUpdate | null
-	overrideEntries: Array<OverrideEntry>
-}> {
-	if (!config.audit.enabled) {
-		return { overrideBranchUpdate: null, overrideEntries: [] }
-	}
-
-	const { audit } = getProvider(providerId)
-
-	console.log(`  Running ${providerId} audit...`)
-	const auditResult = await runAudit({ cwd: dir.workDir, audit })
-
-	if (!auditResult) {
-		console.log('    Audit unavailable or failed, skipping')
-		return { overrideBranchUpdate: null, overrideEntries: [] }
-	}
-
-	const catalogNames = new Set(entries.map((e) => e.name))
-	const overrideEntries = computeOverrides({
-		auditResult,
-		catalogNames,
-		minimumSeverity: config.audit.minimumSeverity,
-		existingOverrides: await loadExistingOverrides({ dir, providerId }),
-		audit
-	})
-
-	if (overrideEntries.length === 0) {
-		console.log('    No transitive vulnerability overrides needed')
-		return { overrideBranchUpdate: null, overrideEntries }
-	}
-
-	const staleCount = overrideEntries.filter(
-		(e) => e.existingOverrideStale
-	).length
-	const newCount = overrideEntries.length - staleCount
-	const parts: Array<string> = []
-	if (newCount > 0) {
-		parts.push(`${newCount} new`)
-	}
-	if (staleCount > 0) {
-		parts.push(`${staleCount} stale (lockfile not re-resolved)`)
-	}
-	console.log(
-		`    Found ${overrideEntries.length} transitive vulnerability override(s): ${parts.join(', ')}`
-	)
-	const overrideBranchUpdate = buildOverrideBranchUpdate({
-		overrides: overrideEntries,
-		branchPrefix: effectiveBranchPrefix,
-		titleSuffix,
-		workDir: dir.workDir,
-		providerId
-	})
-
-	return { overrideBranchUpdate, overrideEntries }
-}
-
-function groupNameFromBranch({
-	branchName,
-	branchPrefix
-}: {
-	branchName: string
-	branchPrefix: string
-}): string {
-	return branchName.slice(`${branchPrefix}/`.length)
-}
-
-async function syncDirectoryPrs({
-	dir,
-	config,
-	location,
-	groups,
-	releaseNotes,
-	titleSuffix,
-	effectiveBranchPrefix,
-	overrideBranchUpdate,
-	overrideEntries
-}: {
-	dir: DirectoryContext
-	config: Config
-	location: CatalogLocation
-	groups: Map<string, Array<UpdateCandidate>>
-	releaseNotes: Map<string, Array<VersionReleaseNote>>
-	titleSuffix: string
-	effectiveBranchPrefix: string
-	overrideBranchUpdate: BranchUpdate | null
-	overrideEntries: Array<OverrideEntry>
-}): Promise<{
+	catalog: CatalogRun
 	existingPrs: Array<ExistingPr>
-	closedCount: number
-	rebuiltCount: number
-}> {
-	console.log('  Checking existing PRs...')
-	const existingPrs = await getExistingPrs({
-		cwd: dir.cwd,
-		branchPrefix: effectiveBranchPrefix
-	})
-	console.log(`    Found ${existingPrs.length} existing catalog-update PRs`)
+}) {
+	const { dir, config, location, effectiveBranchPrefix } = catalog
+	const provider = getProvider(location.providerId)
+	const buildBranchUpdate = makeCatalogBranchBuilder(catalog)
 
 	const overrideBranchPrefix = getOverrideBranchPrefix({
 		branchPrefix: effectiveBranchPrefix
@@ -337,56 +357,40 @@ async function syncDirectoryPrs({
 	)
 
 	// 6b. Sync existing catalog PRs
-	console.log('  Syncing existing catalog PRs...')
-	const catalogSyncResult = await syncExistingPrs({
+	yield* Effect.logInfo('  Syncing existing catalog PRs...')
+	const catalogSyncResult = yield* syncExistingPrs({
 		existingPrs: catalogPrs,
-		resolveBranchUpdate: (branchName: string) => {
-			const groupName = groupNameFromBranch({
-				branchName,
-				branchPrefix: effectiveBranchPrefix
-			})
-			const updates = groups.get(groupName)
+		// Catalog branches are `${prefix}/${groupName}` by construction, so
+		// one slice recovers the group and its updates. The drift check
+		// closes over both instead of re-deriving them from branch strings.
+		resolveSyncPlan: (pr) => {
+			const groupName = pr.headRefName.slice(`${effectiveBranchPrefix}/`.length)
+			const updates = catalog.groups.get(groupName)
 			if (!updates || updates.length === 0) {
 				return null
 			}
-			return buildCatalogBranchUpdate({
-				groupName,
-				updates,
-				config,
-				location,
-				workDir: dir.workDir,
-				titleSuffix,
-				branchPrefix: effectiveBranchPrefix,
-				releaseNotes
-			})
-		},
-		isBranchOutdated: ({ branchUpdate, branchFiles }) => {
-			const definitionContent = branchFiles.get(location.definitionRelPath)
-			if (definitionContent === null || definitionContent === undefined) {
-				return true
+			return {
+				branchUpdate: buildBranchUpdate(groupName, updates),
+				isOutdated: ({ branchFiles }) => {
+					const definitionContent = branchFiles.get(location.definitionRelPath)
+					if (definitionContent === null || definitionContent === undefined) {
+						return true
+					}
+					const definitions = provider.parseDefinitions({
+						content: definitionContent
+					})
+					const definition = definitions.find(
+						(d) => d.catalogName === location.definition.catalogName
+					)
+					if (!definition) {
+						return true
+					}
+					return updates.some(
+						(update) =>
+							definition.entries[update.name] !== buildCatalogValue({ update })
+					)
+				}
 			}
-			const groupName = groupNameFromBranch({
-				branchName: branchUpdate.branch,
-				branchPrefix: effectiveBranchPrefix
-			})
-			const updates = groups.get(groupName)
-			if (!updates || updates.length === 0) {
-				return true
-			}
-			const provider = getProvider(location.providerId)
-			const definitions = provider.parseDefinitions({
-				content: definitionContent
-			})
-			const definition = definitions.find(
-				(d) => d.catalogName === location.definition.catalogName
-			)
-			if (!definition) {
-				return true
-			}
-			return updates.some(
-				(update) =>
-					definition.entries[update.name] !== buildCatalogValue({ update })
-			)
 		},
 		config,
 		dir
@@ -395,72 +399,67 @@ async function syncDirectoryPrs({
 	// 6c. Sync existing override PRs
 	let overrideSyncResult = { closedCount: 0, rebuiltCount: 0 }
 	if (overridePrs.length > 0) {
-		console.log('  Syncing existing override PRs...')
-		const { audit } = getProvider(location.providerId)
-		overrideSyncResult = await syncExistingPrs({
+		yield* Effect.logInfo('  Syncing existing override PRs...')
+		const { audit } = provider
+		overrideSyncResult = yield* syncExistingPrs({
 			existingPrs: overridePrs,
-			resolveBranchUpdate: (_branchName: string) => overrideBranchUpdate,
-			isBranchOutdated: ({ branchFiles }) => {
-				return isOverrideBranchOutdated({
-					branchFiles,
-					audit,
-					expectedOverrides: overrideEntries
-				})
-			},
+			resolveSyncPlan: () =>
+				catalog.overrideBranchUpdate === null
+					? null
+					: {
+							branchUpdate: catalog.overrideBranchUpdate,
+							isOutdated: ({ branchFiles }) =>
+								isOverrideBranchOutdated({
+									branchFiles,
+									audit,
+									expectedOverrides: catalog.overrideEntries
+								})
+						},
 			config,
 			dir
 		})
 	}
 
 	return {
-		existingPrs,
 		closedCount: catalogSyncResult.closedCount + overrideSyncResult.closedCount,
 		rebuiltCount:
 			catalogSyncResult.rebuiltCount + overrideSyncResult.rebuiltCount
 	}
-}
+})
 
-async function createDirectoryPrs({
-	dir,
-	config,
-	location,
+const createDirectoryPrs = Effect.fn('Pipeline.createDirectoryPrs')(function* ({
+	catalog,
 	existingPrs,
-	closedCount,
-	groups,
-	releaseNotes,
-	titleSuffix,
-	effectiveBranchPrefix,
-	overrideBranchUpdate
+	closedCount
 }: {
-	dir: DirectoryContext
-	config: Config
-	location: CatalogLocation
+	catalog: CatalogRun
 	existingPrs: Array<ExistingPr>
 	closedCount: number
-	groups: Map<string, Array<UpdateCandidate>>
-	releaseNotes: Map<string, Array<VersionReleaseNote>>
-	titleSuffix: string
-	effectiveBranchPrefix: string
-	overrideBranchUpdate: BranchUpdate | null
-}): Promise<{ created: number; failed: number }> {
-	const existingBranches = new Set(existingPrs.map((pr) => pr.headRefName))
-	const adjustedExistingCount = existingPrs.length - closedCount
-	let availableSlots = config.maxOpenPrs - adjustedExistingCount
+}) {
+	const { dir, config, effectiveBranchPrefix } = catalog
+	const { overrideBranchUpdate, groups } = catalog
+	const buildBranchUpdate = makeCatalogBranchBuilder(catalog)
 
-	console.log(
-		`  PR limit: ${config.maxOpenPrs}, existing: ${adjustedExistingCount}, available slots: ${availableSlots}`
+	const existingBranches = new Set(existingPrs.map((pr) => pr.headRefName))
+	// openPrCount is the single budget counter: closed PRs free their slot,
+	// each successful creation takes one.
+	let openPrCount = existingPrs.length - closedCount
+
+	yield* Effect.logInfo(
+		`  PR limit: ${config.maxOpenPrs}, existing: ${openPrCount}, available slots: ${config.maxOpenPrs - openPrCount}`
 	)
 
 	let created = 0
-	let openPrCount = adjustedExistingCount
+	let attempted = 0
 
 	// Override PR first (security priority)
 	if (
 		overrideBranchUpdate &&
-		availableSlots > 0 &&
+		openPrCount < config.maxOpenPrs &&
 		!existingBranches.has(overrideBranchUpdate.branch)
 	) {
-		const success = await createPr({
+		attempted++
+		const success = yield* createPr({
 			branchUpdate: overrideBranchUpdate,
 			config,
 			dir
@@ -468,23 +467,17 @@ async function createDirectoryPrs({
 		if (success) {
 			created++
 			openPrCount++
-			availableSlots--
 		}
 	}
 
-	// Catalog PRs
-	const skippedGroups = [...groups.keys()].filter((name) =>
-		existingBranches.has(`${effectiveBranchPrefix}/${name}`)
-	)
-	const eligibleGroups = groups.size - skippedGroups.length
-	const prsToCreate = Math.min(eligibleGroups, availableSlots)
-
-	// Each createPr checks out, installs, commits and force-pushes its own
-	// branch in the shared working tree, so PRs are created one at a time.
-	/* oxlint-disable no-await-in-loop */
+	// Catalog PRs. Each createPr checks out, installs, commits and
+	// force-pushes its own branch in the shared working tree, so PRs are
+	// created one at a time.
 	for (const [groupName, updates] of groups) {
 		if (openPrCount >= config.maxOpenPrs) {
-			console.log(`  Reached PR limit (${config.maxOpenPrs}). Stopping.`)
+			yield* Effect.logInfo(
+				`  Reached PR limit (${config.maxOpenPrs}). Stopping.`
+			)
 			break
 		}
 
@@ -493,40 +486,33 @@ async function createDirectoryPrs({
 			continue
 		}
 
-		const branchUpdate = buildCatalogBranchUpdate({
-			groupName,
-			updates,
+		attempted++
+		const success = yield* createPr({
+			branchUpdate: buildBranchUpdate(groupName, updates),
 			config,
-			location,
-			workDir: dir.workDir,
-			titleSuffix,
-			branchPrefix: effectiveBranchPrefix,
-			releaseNotes
+			dir
 		})
-		const success = await createPr({ branchUpdate, config, dir })
 		if (success) {
 			created++
 			openPrCount++
 		}
 	}
-	/* oxlint-enable no-await-in-loop */
 
-	const totalExpected =
-		prsToCreate +
-		(overrideBranchUpdate && !existingBranches.has(overrideBranchUpdate.branch)
-			? 1
-			: 0)
-	const failed = totalExpected - created
+	// Counting attempts rather than a pre-computed expectation: a failed
+	// creation frees its slot for a later group, but the failure itself must
+	// still surface in the summary.
+	const failed = attempted - created
 
 	return { created, failed }
-}
+})
 
 /**
  * Runs the full update pipeline for one catalog location: load config,
  * re-parse the definition, query the registry, group updates, run the
- * provider audit, then sync and create PRs.
+ * provider audit, then sync and create PRs. A fatal git failure (the working
+ * tree could not be restored) surfaces as a GitError to the caller.
  */
-export async function processCatalog({
+export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 	location,
 	cwd,
 	configPath,
@@ -536,13 +522,13 @@ export async function processCatalog({
 	cwd: string
 	configPath: string
 	dryRun: boolean
-}): Promise<{ created: number; failed: number; rebuilt: number }> {
+}) {
 	const dir = buildDirectoryContext({ cwd, dir: location.dir })
 	const provider = getProvider(location.providerId)
 	const catalogName = location.definition.catalogName
 
 	// 1. Load config
-	const config = await loadConfigForDirectory({ dir, configPath })
+	const config = yield* loadConfigForDirectory({ dir, configPath })
 
 	// Named catalogs get their own branch segment; the default catalog keeps
 	// the historical branch layout.
@@ -559,56 +545,61 @@ export async function processCatalog({
 	const effectiveBranchPrefix = prefixSegments.filter(Boolean).join('/')
 	const titleSuffix = titleParts.length > 0 ? ` (${titleParts.join(', ')})` : ''
 
-	// 2. Re-read the catalog definition (discovery may have run before a fetch)
-	console.log('  Parsing catalog...')
-	let definition: ParsedCatalog | undefined
-	try {
-		const content = await Bun.file(
-			`${dir.workDir}/${location.definitionRelPath}`
-		).text()
-		definition = provider
-			.parseDefinitions({ content })
-			.find((d) => d.catalogName === catalogName)
-	} catch (error: unknown) {
-		console.warn(
-			`  Warning: could not read ${location.definitionRelPath}: ${String(error)}`
-		)
+	const run: DirectoryRun = {
+		dir,
+		config,
+		location,
+		titleSuffix,
+		effectiveBranchPrefix
 	}
 
+	// 2. Re-read the catalog definition (discovery may have run before a fetch)
+	yield* Effect.logInfo('  Parsing catalog...')
+	const fs = yield* FileSystem.FileSystem
+	const definitionContent = yield* fs
+		.readFileString(`${dir.workDir}/${location.definitionRelPath}`)
+		.pipe(Effect.option)
+	const definition: ParsedCatalog | undefined = Option.isSome(definitionContent)
+		? provider
+				.parseDefinitions({ content: definitionContent.value })
+				.find((d) => d.catalogName === catalogName)
+		: undefined
+
+	if (Option.isNone(definitionContent)) {
+		yield* Effect.logWarning(
+			`  Warning: could not read ${location.definitionRelPath}: file unavailable`
+		)
+	}
 	if (!definition) {
-		console.error(
+		yield* Effect.logError(
 			`  No catalog "${catalogName}" found in ${location.definitionRelPath}`
 		)
 		return { created: 0, failed: 0, rebuilt: 0 }
 	}
 
 	const entries = parseCatalog({ catalog: definition.entries })
-	console.log(
+	yield* Effect.logInfo(
 		`    Found ${entries.length} catalog entries (${provider.id}, ${location.definitionRelPath})`
 	)
 
 	// 3–4. Query registry and find updates
-	const candidates = await findCatalogCandidates({ entries, config })
+	const candidates = yield* findCatalogCandidates({ entries, config })
 
 	// 5. Group updates and fetch release notes
 	const {
 		candidates: eligibleCandidates,
 		groups,
 		releaseNotes
-	} = await buildGroupedUpdates({ candidates, config })
+	} = yield* buildGroupedUpdates({ candidates, config })
 
 	// 5b. Override pipeline
-	const { overrideBranchUpdate, overrideEntries } = await findOverrideUpdates({
-		dir,
-		config,
-		providerId: location.providerId,
-		entries,
-		effectiveBranchPrefix,
-		titleSuffix
+	const { overrideBranchUpdate, overrideEntries } = yield* findOverrideUpdates({
+		run,
+		entries
 	})
 
 	if (eligibleCandidates.length === 0 && !overrideBranchUpdate) {
-		console.log('  No updates available')
+		yield* Effect.logInfo('  No updates available')
 		return { created: 0, failed: 0, rebuilt: 0 }
 	}
 
@@ -620,36 +611,40 @@ export async function processCatalog({
 		if (overrideBranchUpdate) {
 			parts.push('1 override PR')
 		}
-		console.log(`  [DRY RUN] Would create ${parts.join(' and ')}`)
+		yield* Effect.logInfo(`  [DRY RUN] Would create ${parts.join(' and ')}`)
 		return { created: 0, failed: 0, rebuilt: 0 }
 	}
 
-	// 6–6c. Sync existing PRs
-	const { existingPrs, closedCount, rebuiltCount } = await syncDirectoryPrs({
-		dir,
-		config,
-		location,
+	// Everything the PR stages share, now that the update artifacts exist.
+	const catalog: CatalogRun = {
+		...run,
 		groups,
 		releaseNotes,
-		titleSuffix,
-		effectiveBranchPrefix,
 		overrideBranchUpdate,
 		overrideEntries
+	}
+
+	// 6–6c. Sync existing PRs
+	yield* Effect.logInfo('  Checking existing PRs...')
+	const existingPrs = yield* getExistingPrs({
+		cwd: dir.cwd,
+		branchPrefix: effectiveBranchPrefix
+	})
+	yield* Effect.logInfo(
+		`    Found ${existingPrs.length} existing catalog-update PRs`
+	)
+
+	const { closedCount, rebuiltCount } = yield* syncDirectoryPrs({
+		catalog,
+		existingPrs
 	})
 
 	// 7. Create PRs
-	const { created, failed } = await createDirectoryPrs({
-		dir,
-		config,
-		location,
+	const { created, failed } = yield* createDirectoryPrs({
+		catalog,
 		existingPrs,
-		closedCount,
-		groups,
-		releaseNotes,
-		titleSuffix,
-		effectiveBranchPrefix,
-		overrideBranchUpdate
+		closedCount
 	})
 
 	return { created, failed, rebuilt: rebuiltCount }
-}
+})

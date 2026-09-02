@@ -1,3 +1,6 @@
+import { Effect, FileSystem, Option } from 'effect'
+
+import { Commands } from './commands'
 import {
 	type AuditCapability,
 	expectedInstallBasenames,
@@ -5,6 +8,7 @@ import {
 	type ProviderId
 } from './providers'
 import {
+	BranchApplyError,
 	type AuditResult,
 	type BranchUpdate,
 	type OverrideEntry,
@@ -28,52 +32,41 @@ const SEVERITY_ORDER = {
 // ---------------------------------------------------------------------------
 
 /**
- * Runs the provider's audit command and returns parsed results, or null when
- * the audit could not be executed/parsed. An empty (clean) result is valid.
- * Uses Bun.spawn directly instead of the exec helper because audit tools
- * return a non-zero exit code when vulnerabilities are found, which is
- * the expected (successful) case — exec would log misleading errors.
+ * Runs the provider's audit command and returns parsed results, or `None`
+ * when the audit output could not be parsed. An empty (clean) result is
+ * valid.
+ *
+ * Uses the silent Commands service rather than the logging wrapper because
+ * audit tools return a non-zero exit code when vulnerabilities are found,
+ * which is the expected (successful) case. A missing audit binary dies at
+ * the Commands adapter — there is no output to interpret.
  */
-export async function runAudit({
+export const runAudit = Effect.fn('Audit.runAudit')(function* ({
 	cwd,
 	audit
 }: {
 	cwd: string
 	audit: AuditCapability
-}): Promise<AuditResult | null> {
-	let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'>
-	try {
-		proc = Bun.spawn(audit.command, {
-			cwd,
-			stdout: 'pipe',
-			stderr: 'pipe',
-			env: process.env
-		})
-	} catch (error: unknown) {
-		console.warn(`  Failed to run ${audit.command.join(' ')}: ${String(error)}`)
-		return null
-	}
+}) {
+	const commands = yield* Commands
+	const result = yield* commands.exec(audit.command, { cwd })
 
-	const [stdout, stderr] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text()
-	])
-	await proc.exited
-
-	const toolName = audit.command[0]
-	const output = (stdout || stderr).trim()
+	const toolName = audit.command.at(0)
+	const output = (result.stdout || result.stderr).trim()
 	if (!output) {
 		// Clean audits may legitimately print nothing (e.g. yarn NDJSON).
-		return {}
+		return Option.some({})
 	}
 
 	const parsed = audit.parseOutput({ output })
 	if (parsed === null) {
-		console.warn(`  ${toolName} audit returned unexpected output format`)
-		return null
+		yield* Effect.logWarning(
+			`  ${toolName} audit returned unexpected output format`
+		)
+		return Option.none()
 	}
-	return parsed
-}
+	return Option.some(parsed)
+})
 
 // ---------------------------------------------------------------------------
 // Parse fixed version from vulnerable_versions range
@@ -206,11 +199,15 @@ export function computeOverrides({
 			const existing = groupMap.get(groupKey)
 
 			if (existing) {
-				existing.advisories.push(advisory)
 				// Keep the highest fixed version within the group
-				if (compareSemver({ a: fixed, b: existing.fixedVersion }) > 0) {
-					existing.fixedVersion = fixed
-				}
+				groupMap.set(groupKey, {
+					...existing,
+					advisories: [...existing.advisories, advisory],
+					fixedVersion:
+						compareSemver({ a: fixed, b: existing.fixedVersion }) > 0
+							? fixed
+							: existing.fixedVersion
+				})
 			} else {
 				groupMap.set(groupKey, {
 					packageName,
@@ -337,13 +334,39 @@ export function buildOverrideBranchUpdate({
 		expectedBasenames: expectedInstallBasenames({ provider, affectedFiles }),
 		deleteLockfiles: [provider.lockfileName],
 		installCommand: provider.installCommand,
-		apply: async () => {
-			const content = await Bun.file(overridePath).text()
-			const existing = audit.readOverrides({ content }) ?? {}
-			const map = computeOverrideMap({ existing, overrides, audit })
-			const updated = audit.writeOverrides({ content, map })
-			await Bun.write(overridePath, updated)
-		}
+		apply: Effect.gen(function* () {
+			const fs = yield* FileSystem.FileSystem
+			const content = yield* fs.readFileString(overridePath).pipe(
+				Effect.mapError(
+					(cause) =>
+						new BranchApplyError({
+							operation: 'Audit.buildOverrideBranchUpdate.read',
+							cause
+						})
+				)
+			)
+			const write = yield* Effect.try({
+				try: () => {
+					const existing = audit.readOverrides({ content }) ?? {}
+					const map = computeOverrideMap({ existing, overrides, audit })
+					return audit.writeOverrides({ content, map })
+				},
+				catch: (cause) =>
+					new BranchApplyError({
+						operation: 'Audit.buildOverrideBranchUpdate.writeOverrides',
+						cause
+					})
+			})
+			yield* fs.writeFileString(overridePath, write).pipe(
+				Effect.mapError(
+					(cause) =>
+						new BranchApplyError({
+							operation: 'Audit.buildOverrideBranchUpdate.write',
+							cause
+						})
+				)
+			)
+		})
 	}
 }
 

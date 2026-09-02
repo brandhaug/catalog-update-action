@@ -230,6 +230,27 @@ export function getIntermediateVersions({
 	return intermediate
 }
 
+/**
+ * The highest version for which `qualifies` holds, or null when none does.
+ * The single max-scan behind every "best version" decision: prerelease
+ * resolution and release-age fallbacks both delegate here.
+ */
+export function highestVersionWhere(
+	versions: Iterable<string>,
+	qualifies: (version: string) => boolean
+): string | null {
+	let best: string | null = null
+	for (const version of versions) {
+		if (!qualifies(version)) {
+			continue
+		}
+		if (!best || compareSemver({ a: best, b: version }) < 0) {
+			best = version
+		}
+	}
+	return best
+}
+
 // ---------------------------------------------------------------------------
 // Shared constants
 // ---------------------------------------------------------------------------
@@ -265,36 +286,4 @@ export function overrideKey(
  */
 export function isToolOverrideKey(key: string): boolean {
 	return /^.+@[<>=]/.test(key)
-}
-
-// ---------------------------------------------------------------------------
-// Concurrency
-// ---------------------------------------------------------------------------
-
-export class Semaphore {
-	private queue: Array<() => void> = []
-	private running = 0
-
-	constructor(private concurrency: number) {}
-
-	async acquire(): Promise<void> {
-		if (this.running < this.concurrency) {
-			this.running++
-			return
-		}
-		return new Promise<void>((resolve) => {
-			this.queue.push(() => {
-				this.running++
-				resolve()
-			})
-		})
-	}
-
-	release(): void {
-		this.running--
-		const next = this.queue.shift()
-		if (next) {
-			next()
-		}
-	}
 }
