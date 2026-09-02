@@ -64,6 +64,10 @@ export type DirectoryContext = {
 // ---------------------------------------------------------------------------
 
 /** Failure produced while writing an update into the working tree. */
+// Schema.TaggedError declarations are class declarations, not throw sites;
+// unicorn/throw-new-error misreads the TaggedError() constructor call as an
+// un-newed throw.
+// oxlint-disable-next-line unicorn/throw-new-error
 export class BranchApplyError extends Schema.TaggedError<BranchApplyError>()(
 	'BranchApplyError',
 	{

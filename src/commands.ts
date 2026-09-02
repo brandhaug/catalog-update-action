@@ -18,6 +18,14 @@ export type CommandResult = {
 // Service
 // ---------------------------------------------------------------------------
 
+/** Join a child process output stream into a single string. */
+const collectText = Effect.fnUntraced(function* (
+	stream: Stream.Stream<Uint8Array, PlatformError>
+) {
+	const lines = yield* Stream.runCollect(Stream.decodeText(stream))
+	return lines.join('')
+})
+
 /**
  * Runs external commands (git, gh, package manager installs and audits).
  *
@@ -56,12 +64,6 @@ export class Commands extends Context.Service<
 								extendEnv: true
 							})
 						)
-						const collectText = Effect.fn('Commands.collectText')(function* (
-							stream: Stream.Stream<Uint8Array, PlatformError>
-						) {
-							const lines = yield* Stream.runCollect(Stream.decodeText(stream))
-							return lines.join('')
-						})
 						const [stdout, stderr, exitCode] = yield* Effect.all([
 							collectText(handle.stdout),
 							collectText(handle.stderr),

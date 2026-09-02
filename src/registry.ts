@@ -68,19 +68,6 @@ const githubReleasesSchema = Schema.Array(
 )
 
 // ---------------------------------------------------------------------------
-// Errors
-// ---------------------------------------------------------------------------
-
-/** Transport, timeout or decode failure against a registry or releases API. */
-export class RegistryError extends Schema.TaggedError<RegistryError>()(
-	'RegistryError',
-	{
-		operation: Schema.String,
-		cause: Schema.Defect()
-	}
-) {}
-
-// ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
@@ -122,15 +109,14 @@ export class Registry extends Context.Service<
 				// transient set fetchWithRetry used to handle by hand.
 				HttpClient.retryTransient({ schedule: RETRY_SCHEDULE, times: 1 })
 			)
-			const githubToken = yield* Config.option(
-				Config.string('GITHUB_TOKEN')
-			).pipe(Effect.catch(() => Effect.succeed(Option.none())))
+			const githubToken = yield* Config.option(Config.string('GITHUB_TOKEN'))
 
 			/**
-			 * Execute a request, decode the body with `schema`, and classify the
-			 * outcome: `Some` on a decoded 2xx response, `None` on a non-2xx
-			 * status (warned about here), `RegistryError` on transport/timeout/
-			 * decode failure.
+			 * Execute a request and decode the body with `schema`, classifying the
+			 * outcome: `Some` on a decoded 2xx response, `None` when the package
+			 * has no usable data — a non-2xx status, a transport/timeout failure
+			 * or a decode failure, each warned about here so the query loops can
+			 * simply skip `None`.
 			 */
 			const fetchJson = <
 				S extends Schema.Constraint & { readonly DecodingServices: never }
@@ -138,12 +124,11 @@ export class Registry extends Context.Service<
 				operation: string,
 				request: HttpClientRequest.HttpClientRequest,
 				schema: S
-			): Effect.Effect<Option.Option<S['Type']>, never> =>
+			): Effect.Effect<Option.Option<S['Type']>> =>
 				Effect.gen(function* () {
-					const response = yield* client.execute(request).pipe(
-						Effect.timeout(REQUEST_TIMEOUT),
-						Effect.mapError((cause) => new RegistryError({ operation, cause }))
-					)
+					const response = yield* client
+						.execute(request)
+						.pipe(Effect.timeout(REQUEST_TIMEOUT))
 
 					if (response.status >= 400) {
 						yield* Effect.logWarning(
@@ -154,17 +139,16 @@ export class Registry extends Context.Service<
 
 					return yield* HttpClientResponse.schemaBodyJson(schema)(
 						response
-					).pipe(
-						Effect.mapBoth({
-							onFailure: (cause) => new RegistryError({ operation, cause }),
-							onSuccess: Option.some
-						})
-					)
+					).pipe(Effect.map(Option.some))
 				}).pipe(
-					// Transport/timeout/decode failures are per-package concerns: the
-					// query loops treat them as "no data" with a warning, mirroring
-					// the old per-entry catch-and-skip behavior.
-					Effect.catch(() => Effect.succeed(Option.none()))
+					// Transport/timeout/decode failures are per-package concerns:
+					// warn and report "no data", mirroring the old per-entry
+					// catch-and-skip behavior.
+					Effect.catch((error) =>
+						Effect.logWarning(
+							`  Warning: ${operation} failed: ${String(error)}`
+						).pipe(Effect.as(Option.none()))
+					)
 				)
 
 			const queryNpmRegistry = Effect.fn('Registry.queryNpmRegistry')(
@@ -237,42 +221,49 @@ export class Registry extends Context.Service<
 					readonly concurrency: number
 				}) {
 					const results = new Map<string, PackageMetadata>()
-					const seen = new Map<string, PackageMetadata>()
+
+					// One fetch per distinct npmName; aliases of the same package
+					// (catalog name ≠ npm name) share the result. Grouping up front
+					// keeps concurrent loops from double-fetching, matching the
+					// repo-grouped release-notes query below.
+					const byNpmName = new Map<string, Array<UpdateCandidate>>()
+					for (const candidate of candidates) {
+						const group = byNpmName.get(candidate.npmName)
+						if (group) {
+							group.push(candidate)
+						} else {
+							byNpmName.set(candidate.npmName, [candidate])
+						}
+					}
 
 					yield* Effect.forEach(
-						candidates,
-						Effect.fn('Registry.queryPackageMetadata.entry')(
-							function* (candidate) {
-								const cached = seen.get(candidate.npmName)
-								if (cached) {
-									results.set(candidate.name, cached)
-									return
-								}
+						[...byNpmName],
+						Effect.fn('Registry.queryPackageMetadata.package')(function* ([
+							npmName,
+							group
+						]) {
+							const data = yield* fetchJson(
+								`fetch metadata for ${npmName}`,
+								registryRequest(npmName, 'application/json'),
+								npmMetadataResponseSchema
+							)
 
-								const data = yield* fetchJson(
-									`fetch metadata for ${candidate.npmName}`,
-									registryRequest(candidate.npmName, 'application/json'),
-									npmMetadataResponseSchema
-								)
+							if (Option.isNone(data)) {
+								return
+							}
 
-								if (Option.isNone(data)) {
-									return
-								}
-
-								const repoUrl = data.value.repository?.url
-								const repo = repoUrl ? parseGitHubRepo({ url: repoUrl }) : null
-								const metadata: PackageMetadata = {
-									repo,
-									publishedVersions: data.value.versions
-										? Object.keys(data.value.versions)
-										: [],
-									publishTimes: data.value.time ?? {}
-								}
-
-								seen.set(candidate.npmName, metadata)
+							const repoUrl = data.value.repository?.url
+							const metadata: PackageMetadata = {
+								repo: repoUrl ? parseGitHubRepo({ url: repoUrl }) : null,
+								publishedVersions: data.value.versions
+									? Object.keys(data.value.versions)
+									: [],
+								publishTimes: data.value.time ?? {}
+							}
+							for (const candidate of group) {
 								results.set(candidate.name, metadata)
 							}
-						),
+						}),
 						{ concurrency, discard: true }
 					)
 
@@ -453,6 +444,10 @@ export function getVersionAgeDays({
 	publishTime: string
 	nowEpochMs: number
 }): number | null {
+	// new Date(publishTime) parses the ISO 8601 timestamps npm's registry
+	// metadata returns; it never reads the wall clock. The current time is
+	// injected by the caller from Effect's Clock (DateTime.now).
+	// oxlint-disable-next-line effect/noGlobals
 	const publishDate = new Date(publishTime)
 	if (Number.isNaN(publishDate.getTime())) {
 		return null

@@ -150,6 +150,10 @@ export function applyBunCatalogUpdates({
 }): string {
 	const pkg = parsePackageJson({ content })
 	if (!pkg) {
+		// Provider functions may throw by contract: the BranchUpdate apply
+		// adapters wrap every call in Effect.try and map the throw into a
+		// typed BranchApplyError.
+		// oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
 		throw new Error('Invalid package.json')
 	}
 
@@ -157,10 +161,15 @@ export function applyBunCatalogUpdates({
 		(candidate) => candidate.catalogName === catalogName
 	)
 	if (!section) {
+		// oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
 		throw new Error(`No catalog "${catalogName}" found in package.json`)
 	}
 
 	const updated = withCatalogUpdates(pkg, section.path, updates)
+	// Definition files are rewritten in the exact 2-space + trailing-newline
+	// format the package managers themselves emit, which a Schema encoder
+	// would not reproduce byte-for-byte.
+	// oxlint-disable-next-line effect/noGlobals
 	return `${JSON.stringify(updated, null, 2)}\n`
 }
 

@@ -57,16 +57,16 @@ const nonNegativeIntSchema = Schema.Number.check(
  * zod `.catch()` semantics: one bad field never invalidates the rest of the
  * config.
  */
-function decodeField<A>(
-	decode: (input: JsonValue) => Option.Option<A>,
-	value: JsonValue | undefined,
-	fallback: A
-): A {
-	if (value === undefined || value === null) {
+function field<
+	S extends Schema.Constraint & { readonly DecodingServices: never }
+>(schema: S, raw: JsonValue | undefined, fallback: S['Type']): S['Type'] {
+	if (raw === undefined || raw === null) {
 		return fallback
 	}
-	const decoded = decode(value)
-	return Option.isSome(decoded) ? decoded.value : fallback
+	return Option.getOrElse(
+		Schema.decodeUnknownOption(schema)(raw),
+		() => fallback
+	)
 }
 
 /**
@@ -167,18 +167,15 @@ function parseIgnoreRules({
 }
 
 export function parseAuditConfig({ raw }: { raw: unknown }): AuditConfig {
-	const object = readJsonObject(raw)
-	if (!object) {
-		return DEFAULT_AUDIT_CONFIG
-	}
+	const object = readJsonObject(raw) ?? {}
 	return {
-		enabled: decodeField(
-			Schema.decodeUnknownOption(Schema.Boolean),
+		enabled: field(
+			Schema.Boolean,
 			object.enabled,
 			DEFAULT_AUDIT_CONFIG.enabled
 		),
-		minimumSeverity: decodeField(
-			Schema.decodeUnknownOption(severitySchema),
+		minimumSeverity: field(
+			severitySchema,
 			object.minimumSeverity,
 			DEFAULT_AUDIT_CONFIG.minimumSeverity
 		)
@@ -190,18 +187,15 @@ export function parseAutoMergeConfig({
 }: {
 	raw: unknown
 }): AutoMergeConfig {
-	const object = readJsonObject(raw)
-	if (!object) {
-		return DEFAULT_AUTO_MERGE_CONFIG
-	}
+	const object = readJsonObject(raw) ?? {}
 	return {
-		enabled: decodeField(
-			Schema.decodeUnknownOption(Schema.Boolean),
+		enabled: field(
+			Schema.Boolean,
 			object.enabled,
 			DEFAULT_AUTO_MERGE_CONFIG.enabled
 		),
-		mergeMethod: decodeField(
-			Schema.decodeUnknownOption(mergeMethodSchema),
+		mergeMethod: field(
+			mergeMethodSchema,
 			object.mergeMethod,
 			DEFAULT_AUTO_MERGE_CONFIG.mergeMethod
 		)
@@ -263,28 +257,28 @@ export const loadConfig = Effect.fn('Config.loadConfig')(function* ({
 	}
 
 	const config: Config = {
-		branchPrefix: decodeField(
-			Schema.decodeUnknownOption(Schema.String),
+		branchPrefix: field(
+			Schema.String,
 			object.branchPrefix,
 			DEFAULT_CONFIG.branchPrefix
 		),
-		defaultBranch: decodeField(
-			Schema.decodeUnknownOption(Schema.String),
+		defaultBranch: field(
+			Schema.String,
 			object.defaultBranch,
 			DEFAULT_CONFIG.defaultBranch
 		),
-		maxOpenPrs: decodeField(
-			Schema.decodeUnknownOption(Schema.Number),
+		maxOpenPrs: field(
+			Schema.Number,
 			object.maxOpenPrs,
 			DEFAULT_CONFIG.maxOpenPrs
 		),
-		concurrency: decodeField(
-			Schema.decodeUnknownOption(Schema.Number),
+		concurrency: field(
+			Schema.Number,
 			object.concurrency,
 			DEFAULT_CONFIG.concurrency
 		),
-		minReleaseAgeDays: decodeField(
-			Schema.decodeUnknownOption(nonNegativeIntSchema),
+		minReleaseAgeDays: field(
+			nonNegativeIntSchema,
 			object.minReleaseAgeDays,
 			DEFAULT_CONFIG.minReleaseAgeDays
 		),

@@ -14,8 +14,12 @@ const plainLogger = Logger.make((options: Logger.Options<unknown>) => {
 		: [String(options.message)]
 	const line = parts.join(' ')
 	if (LogLevel.isGreaterThanOrEqualTo(options.logLevel, 'Warn')) {
+		// The plain logger is the one place that owns console writes: it exists
+		// so every other module can use Effect.log* and stay runtime-agnostic.
+		// oxlint-disable-next-line effect/noGlobals
 		console.error(line)
 	} else {
+		// oxlint-disable-next-line effect/noGlobals
 		console.log(line)
 	}
 })

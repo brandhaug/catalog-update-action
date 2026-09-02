@@ -24,7 +24,7 @@ Entry point: `src/main.ts`.
 
 ## Linting & Formatting
 
-oxlint (type-aware) + oxfmt, configured in `.oxlintrc.json` / `.oxfmtrc.json`. The Effect plugin (`oxlint-plugin-effect`) enforces Effect discipline (typed errors, no try/catch, no `new Error`, no globals in application code), with documented per-path exemptions for the process boundary (`src/main.ts`), the logger, the provider throw contract, and test fixtures. Formatting is enforced by a pre-commit hook (`.githooks/`, enabled by the `prepare` script) that auto-fixes fmt + lint on commit. CI enforces `bun run lint` and `bun test` on PRs.
+oxlint (type-aware) + oxfmt, configured in `.oxlintrc.json` / `.oxfmtrc.json`. The Effect plugin (`oxlint-plugin-effect`) enforces Effect discipline (typed errors, no try/catch, no `new Error`, no globals in application code). Rule suppressions are targeted `oxlint-disable-next-line` comments at the exact sites that need them (the provider throw contract, the logger's console writes, discovery's `Bun.Glob`, the registry's date parsing, the JSON codec and unknown-typed schema params, `Schema.TaggedError` declarations, and main's async entry); only the process boundary (`src/main.ts` globals) and test fixtures keep per-path overrides. Formatting is enforced by a pre-commit hook (`.githooks/`, enabled by the `prepare` script) that auto-fixes fmt + lint on commit. CI enforces `bun run lint` and `bun test` on PRs.
 
 ## Project Structure
 

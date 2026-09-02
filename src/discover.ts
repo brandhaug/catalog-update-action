@@ -24,6 +24,10 @@ function compareDirs(a: string, b: string): number {
 /** Collect every path matched by a Bun glob, relative to `cwd`. */
 const scanGlob = (glob: string, cwd: string): Effect.Effect<Array<string>> =>
 	Effect.promise(() =>
+		// Bun.Glob is the Bun platform's glob capability; Effect's FileSystem
+		// service has no directory search, and discovery is the adapter where
+		// the runtime's own scanner is the tool.
+		// oxlint-disable-next-line effect/noGlobals
 		Array.fromAsync(new Bun.Glob(glob).scan({ cwd, dot: true }))
 	)
 

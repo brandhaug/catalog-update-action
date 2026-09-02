@@ -126,11 +126,15 @@ function parseArgs(): CliOptions {
 // ---------------------------------------------------------------------------
 
 /** git fetch failed before the run could start. */
+// Schema.TaggedError declarations are class declarations, not throw sites;
+// unicorn/throw-new-error misreads the TaggedError() constructor call as an
+// un-newed throw.
+// oxlint-disable-next-line unicorn/throw-new-error
 class FetchFailed extends Schema.TaggedError<FetchFailed>()('FetchFailed', {
 	cause: Schema.Defect()
 }) {}
 
-const mainProgram = Effect.fn('Main')(function* (
+const mainProgram = Effect.fn('Main.run')(function* (
 	options: CliOptions & { excludeDirectories: Array<string> }
 ) {
 	const cwd = process.cwd()
@@ -252,6 +256,9 @@ const runtimeLayer = Layer.mergeAll(
 	plainLoggerLayer
 )
 
+// The async entry function and its awaits are the process boundary: the CLI
+// awaits one runPromise to derive the process exit code.
+// oxlint-disable-next-line effect/noAsyncFunction
 const run = async (): Promise<void> => {
 	const options = parseArgs()
 
@@ -260,7 +267,7 @@ const run = async (): Promise<void> => {
 		// Actions), fall back to the CLI arg for local usage.
 		const envExclude = yield* Config.option(
 			Config.string('CATALOG_UPDATE_EXCLUDE')
-		).pipe(Effect.catch(() => Effect.succeed(Option.none())))
+		)
 		const rawExclude = Option.isSome(envExclude)
 			? envExclude.value
 			: options.excludeRaw
@@ -274,6 +281,7 @@ const run = async (): Promise<void> => {
 		return yield* mainProgram({ ...options, excludeDirectories })
 	})
 
+	// oxlint-disable-next-line effect/noAsyncFunction
 	const exit = await Effect.runPromiseExit(
 		program.pipe(Effect.provide(runtimeLayer))
 	)
@@ -287,4 +295,5 @@ const run = async (): Promise<void> => {
 	}
 }
 
+// oxlint-disable-next-line effect/noAsyncFunction
 await run()

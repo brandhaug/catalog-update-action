@@ -92,6 +92,10 @@ export function applyYamlCatalogUpdates({
 	const doc = parseDocument(content)
 	const firstError = doc.errors.at(0)
 	if (firstError) {
+		// Provider functions may throw by contract: the BranchUpdate apply
+		// adapters wrap every call in Effect.try and map the throw into a
+		// typed BranchApplyError.
+		// oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
 		throw new Error(`Invalid YAML: ${String(firstError)}`)
 	}
 
@@ -142,6 +146,7 @@ export function writeYamlTopLevelMap({
 	const doc = parseDocument(content)
 	const firstError = doc.errors.at(0)
 	if (firstError) {
+		// oxlint-disable-next-line effect/noThrowStatement, effect/noNewError
 		throw new Error(`Invalid YAML: ${String(firstError)}`)
 	}
 

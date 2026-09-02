@@ -20,6 +20,10 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Fatal git workflow failure: the working tree could not be restored. */
+// Schema.TaggedError declarations are class declarations, not throw sites;
+// unicorn/throw-new-error misreads the TaggedError() constructor call as an
+// un-newed throw.
+// oxlint-disable-next-line unicorn/throw-new-error
 export class GitError extends Schema.TaggedError<GitError>()('GitError', {
 	operation: Schema.String,
 	cause: Schema.Defect()
@@ -401,7 +405,7 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 		{ cwd }
 	)
 	if (checkoutResult.exitCode !== 0) {
-		return { success: false }
+		return false
 	}
 
 	// Roll back to the default branch after any mid-pipeline failure so the
@@ -410,7 +414,7 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 		Effect.gen(function* () {
 			yield* Effect.logError(message)
 			yield* returnToDefault({ defaultBranch: config.defaultBranch, cwd })
-			return { success: false }
+			return false
 		})
 
 	// Apply failure rolls back and reports a plain failure; only a fatal
@@ -484,7 +488,7 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	}
 
 	yield* returnToDefault({ defaultBranch: config.defaultBranch, cwd })
-	return { success: true }
+	return true
 })
 
 // ---------------------------------------------------------------------------
@@ -560,8 +564,8 @@ export const createPr = Effect.fn('Git.createPr')(function* ({
 }) {
 	yield* Effect.logInfo(`\n  Creating PR for branch "${branchUpdate.branch}"`)
 
-	const result = yield* updateBranch({ branchUpdate, config, dir })
-	if (!result.success) {
+	const updated = yield* updateBranch({ branchUpdate, config, dir })
+	if (!updated) {
 		return false
 	}
 
@@ -637,6 +641,8 @@ export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 
 	yield* Effect.logInfo(`  Syncing ${existingPrs.length} existing PR(s)`)
 
+	const commands = yield* Commands
+
 	// Commit authorship checks are independent read-only queries, so they run
 	// concurrently ahead of the sequential sync loop.
 	const nonBotFlags = yield* Effect.forEach(
@@ -672,7 +678,6 @@ export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 			yield* Effect.logInfo(
 				`  Closing stale PR #${pr.number} — no longer needed`
 			)
-			const commands = yield* Commands
 			const closeResult = yield* commands.exec(
 				[
 					'gh',
@@ -739,24 +744,22 @@ export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 
 		// A fatal checkout failure while rebuilding must not abort the whole
 		// sync; log it and move on to the next PR.
-		const result = yield* updateBranch({ branchUpdate, config, dir }).pipe(
-			Effect.catch((error) =>
-				Effect.logError(
-					`  Error rebuilding PR #${pr.number} (${pr.headRefName}): ${String(error)}`
-				).pipe(Effect.as<'fatal'>('fatal'))
-			)
+		const outcome = yield* Effect.result(
+			updateBranch({ branchUpdate, config, dir })
 		)
-		if (result === 'fatal') {
+		if (outcome._tag === 'Failure') {
+			yield* Effect.logError(
+				`  Error rebuilding PR #${pr.number} (${pr.headRefName}): ${String(outcome.failure)}`
+			)
 			continue
 		}
-		if (!result.success) {
+		if (!outcome.success) {
 			yield* Effect.logError(
 				`  Failed to rebuild PR #${pr.number} (${pr.headRefName})`
 			)
 			continue
 		}
 
-		const commands = yield* Commands
 		const editResult = yield* commands.exec(
 			[
 				'gh',

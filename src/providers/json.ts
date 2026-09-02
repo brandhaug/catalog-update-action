@@ -41,8 +41,15 @@ export function writeJsonStringMap({
 	field: string
 	map: Record<string, string>
 }): string {
+	// Throws on invalid JSON by contract: callers apply this inside a
+	// BranchUpdate apply effect, which maps the failure into the rollback path.
+	// oxlint-disable-next-line effect/noGlobals
 	const doc: JsonObject = JSON.parse(content)
 	if (Object.keys(map).length > 0) {
+		// Definition files are rewritten in the exact 2-space + trailing-newline
+		// format the package managers themselves emit, which a Schema encoder
+		// would not reproduce byte-for-byte.
+		// oxlint-disable-next-line effect/noGlobals
 		return `${JSON.stringify({ ...doc, [field]: map }, null, 2)}\n`
 	}
 	// An empty map removes the field entirely.
@@ -52,5 +59,6 @@ export function writeJsonStringMap({
 			rest[key] = value
 		}
 	}
+	// oxlint-disable-next-line effect/noGlobals
 	return `${JSON.stringify(rest, null, 2)}\n`
 }

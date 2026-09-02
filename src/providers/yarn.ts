@@ -1,5 +1,5 @@
 import { Option, Schema } from 'effect'
-import { severitySchema } from '../schemas'
+import { parseJsonDocument, severitySchema } from '../schemas'
 import { parseSemver } from '../utils'
 import { type AuditResult, type Severity } from '../types'
 import { type AuditCapability, type CatalogProvider } from './types'
@@ -44,7 +44,7 @@ function parseYarnAuditOutput({
 	const result: AuditResult = {}
 	let parsedCount = 0
 	for (const line of lines) {
-		const raw = parseJsonLine(line)
+		const raw = parseJsonDocument(line)
 		if (Option.isNone(raw)) {
 			continue
 		}
@@ -76,10 +76,6 @@ function parseYarnAuditOutput({
 	}
 	return result
 }
-
-/** Parse one NDJSON line, returning None for malformed JSON. */
-const parseJsonLine = (input: string): Option.Option<unknown> =>
-	Option.liftThrowable(JSON.parse)(input)
 
 // ---------------------------------------------------------------------------
 // Overrides

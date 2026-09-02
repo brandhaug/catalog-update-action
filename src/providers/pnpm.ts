@@ -1,5 +1,5 @@
 import { Option, Schema } from 'effect'
-import { severitySchema } from '../schemas'
+import { parseJsonDocument, severitySchema } from '../schemas'
 import { isToolOverrideKey, overrideKey } from '../utils'
 import { type AuditResult } from '../types'
 import { type AuditCapability, type CatalogProvider } from './types'
@@ -9,10 +9,6 @@ import {
 	readYamlTopLevelMap,
 	writeYamlTopLevelMap
 } from './yaml'
-
-/** Parse a JSON document, returning None instead of throwing on invalid input. */
-const parseJson = (input: string): Option.Option<unknown> =>
-	Option.liftThrowable(JSON.parse)(input)
 
 // ---------------------------------------------------------------------------
 // Audit
@@ -42,7 +38,7 @@ function parsePnpmAuditOutput({
 }: {
 	output: string
 }): AuditResult | null {
-	const parsed = parseJson(output)
+	const parsed = parseJsonDocument(output)
 	if (Option.isNone(parsed)) {
 		return null
 	}

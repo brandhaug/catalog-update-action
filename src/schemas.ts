@@ -27,12 +27,17 @@ export type JsonObject = Record<string, JsonValue>
  * before any Schema decoding happens.
  */
 export const parseJsonDocument = (input: string): Option.Option<unknown> =>
+	// The repo's single JSON.parse codec: every raw JSON string flows through
+	// here before any Schema decoding happens.
+	// oxlint-disable-next-line effect/noGlobals
 	Option.liftThrowable(JSON.parse)(input)
 
 /**
  * Decode a raw JSON object document, returning a mutable copy on success and
- * undefined when the value is not an object of JSON values.
+ * undefined when the value is not an object of JSON values. The unknown-typed
+ * parameter exists to have a Schema run over it on the next line.
  */
+// oxlint-disable-next-line anti-slop/no-unknown-parameters
 export function readJsonObject(value: unknown): JsonObject | undefined {
 	const result = Schema.decodeUnknownResult(jsonObjectSchema)(value)
 	if (result._tag === 'Failure') {
@@ -46,9 +51,12 @@ const stringRecordSchema = Schema.Record(Schema.String, Schema.String)
 
 /**
  * Read a value as a flat string map (catalog entries, override maps),
- * returning undefined when the value is missing or not a string record.
+ * returning undefined when the value is missing or not a string record. The
+ * unknown-typed parameter exists to have a Schema run over it on the next
+ * line.
  */
 export function readStringRecord(
+	// oxlint-disable-next-line anti-slop/no-unknown-parameters
 	value: unknown
 ): Record<string, string> | undefined {
 	const result = Schema.decodeUnknownResult(stringRecordSchema)(value)
