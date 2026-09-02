@@ -36,6 +36,17 @@ runs:
       with:
         bun-version: ${{ inputs.bun-version }}
 
+    # The action runs from source, so its own dependencies must be installed
+    # before main.ts can import effect/@effect/platform-bun/yaml. Without this,
+    # Bun falls back to auto-install, which resolves the `latest` dist-tag —
+    # wrong versions for rc-pinned deps. Runtime deps only (--production),
+    # lockfile is committed (--frozen-lockfile), and scripts are skipped
+    # (--ignore-scripts) so `prepare` cannot touch git config on the runner.
+    - name: Install action dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      run: bun install --frozen-lockfile --production --ignore-scripts
+
     - name: Run catalog updater
       shell: bash
       env:
