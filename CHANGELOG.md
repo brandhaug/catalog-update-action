@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.0](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.12.2...catalog-update-action-v1.0.0) (2026-09-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* the `packageManager` config option is removed - the package manager is now detected from the catalog definition files (package.json / pnpm-workspace.yaml / .yarnrc.yml). Existing configs that set it are ignored with a deprecation warning.
+
+### Features
+
+* support pnpm and yarn catalogs with per-manager audits ([#29](https://github.com/brandhaug/catalog-update-action/issues/29)) ([4d98a77](https://github.com/brandhaug/catalog-update-action/commit/4d98a7750a524137b24f959a31142515f8b6254d))
+
+
+### Code Refactoring
+
+* rewrite to Effect v4, replacing zod with Effect Schema ([#31](https://github.com/brandhaug/catalog-update-action/issues/31)) ([c83d4f5](https://github.com/brandhaug/catalog-update-action/commit/c83d4f548a94dae18e243fb2e49d5de95bd8bba1))
+
 ## [0.12.2](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v0.12.1...catalog-update-action-v0.12.2) (2026-08-30)
 
 
