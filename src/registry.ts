@@ -20,16 +20,14 @@ import {
 	type UpdateCandidate,
 	type VersionReleaseNote
 } from './types'
+import { clampNoteBody } from './release-notes'
 import {
-	classifySemverChange,
-	compareSemver,
 	extractVersionFromTag,
 	getIntermediateVersions,
-	parseSemver
+	highestVersionWhere,
+	parseSemver,
+	compareSemver
 } from './utils'
-
-const RELEASE_NOTES_MAX_LENGTH = 2000
-const COMBINED_RELEASE_NOTES_MAX_LENGTH = 5000
 
 /** Total time budget for one registry call, including its retry. */
 const REQUEST_TIMEOUT = '15 seconds'
@@ -178,22 +176,14 @@ export class Registry extends Context.Service<
 							}
 
 							if (parseSemver({ version: entry.currentVersion })?.prerelease) {
-								// Prerelease entry: find highest version from all published versions
-								const allVersions = data.value.versions
-									? Object.keys(data.value.versions)
-									: []
-								let best: string | null = null
-								for (const v of allVersions) {
-									if (!parseSemver({ version: v })) {
-										continue
-									}
-									if (compareSemver({ a: entry.currentVersion, b: v }) >= 0) {
-										continue
-									}
-									if (!best || compareSemver({ a: best, b: v }) < 0) {
-										best = v
-									}
-								}
+								// Prerelease entry: highest published version above the
+								// current one, prereleases included
+								const best = highestVersionWhere(
+									Object.keys(data.value.versions ?? {}),
+									(version) =>
+										parseSemver({ version }) !== null &&
+										compareSemver({ a: entry.currentVersion, b: version }) < 0
+								)
 								if (best) {
 									results.set(entry.name, best)
 								}
@@ -384,13 +374,12 @@ export class Registry extends Context.Service<
 										continue
 									}
 
-									let body = release.body
-									if (body.length > RELEASE_NOTES_MAX_LENGTH) {
-										const releaseUrl =
+									const body = clampNoteBody({
+										body: release.body,
+										releaseUrl:
 											release.htmlUrl ||
 											`https://github.com/${repo.owner}/${repo.repo}/releases`
-										body = `${body.slice(0, RELEASE_NOTES_MAX_LENGTH)}\n\n…[full notes](${releaseUrl})`
-									}
+									})
 
 									notes.push({ version, body })
 								}
@@ -426,7 +415,8 @@ export class Registry extends Context.Service<
 
 const repoKey = (repo: GitHubRepo): string => `${repo.owner}/${repo.repo}`
 
-function parseGitHubRepo({ url }: { url: string }): GitHubRepo | null {
+/** Parse a GitHub `owner/repo` out of an npm repository URL, or null. */
+export function parseGitHubRepo({ url }: { url: string }): GitHubRepo | null {
 	const match = url.match(
 		/github\.com[/:]([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+?)(?:\.git)?$/
 	)
@@ -434,246 +424,4 @@ function parseGitHubRepo({ url }: { url: string }): GitHubRepo | null {
 		return null
 	}
 	return { owner: match[1], repo: match[2] }
-}
-
-/** Returns the age of a version in days based on its npm publish time, or null if unknown. */
-export function getVersionAgeDays({
-	publishTime,
-	nowEpochMs
-}: {
-	publishTime: string
-	nowEpochMs: number
-}): number | null {
-	// new Date(publishTime) parses the ISO 8601 timestamps npm's registry
-	// metadata returns; it never reads the wall clock. The current time is
-	// injected by the caller from Effect's Clock (DateTime.now).
-	// oxlint-disable-next-line effect/noGlobals
-	const publishDate = new Date(publishTime)
-	if (Number.isNaN(publishDate.getTime())) {
-		return null
-	}
-	return (nowEpochMs - publishDate.getTime()) / (1000 * 60 * 60 * 24)
-}
-
-export type ReleaseAgeEvent = {
-	readonly name: string
-	readonly message: string
-}
-
-/** Candidates that survived the release-age quarantine, plus its narration. */
-export type ReleaseAgeFilter = {
-	candidates: Array<UpdateCandidate>
-	events: Array<ReleaseAgeEvent>
-}
-
-/** Find the newest published version that is older than minReleaseAgeDays and newer than currentVersion. */
-function findBestQualifyingVersion({
-	currentVersion,
-	publishedVersions,
-	publishTimes,
-	minReleaseAgeDays,
-	isPrerelease,
-	nowEpochMs
-}: {
-	currentVersion: string
-	publishedVersions: Array<string>
-	publishTimes: Record<string, string>
-	minReleaseAgeDays: number
-	isPrerelease: boolean
-	nowEpochMs: number
-}): string | null {
-	let best: string | null = null
-
-	for (const version of publishedVersions) {
-		// Skip pre-releases unless current is pre-release
-		if (!isPrerelease && version.includes('-')) {
-			continue
-		}
-		if (!parseSemver({ version })) {
-			continue
-		}
-
-		// Must be an upgrade from current
-		if (compareSemver({ a: currentVersion, b: version }) >= 0) {
-			continue
-		}
-
-		// Must meet the age requirement
-		const publishTime = publishTimes[version]
-		if (!publishTime) {
-			continue
-		}
-
-		const ageDays = getVersionAgeDays({ publishTime, nowEpochMs })
-		if (ageDays === null || ageDays < minReleaseAgeDays) {
-			continue
-		}
-
-		// Keep the newest qualifying version
-		if (!best || compareSemver({ a: best, b: version }) < 0) {
-			best = version
-		}
-	}
-
-	return best
-}
-
-/**
- * Filter candidates by minimum release age. For each candidate whose latest version
- * is too young, attempt to find the newest published version that satisfies the age
- * requirement and is still an upgrade from current. If none qualifies, the candidate
- * is removed.
- *
- * Pure: the caller supplies `now` and narrates the returned events.
- */
-export function filterByReleaseAge({
-	candidates,
-	packageMetadata,
-	minReleaseAgeDays,
-	nowEpochMs
-}: {
-	candidates: Array<UpdateCandidate>
-	packageMetadata: Map<string, PackageMetadata>
-	minReleaseAgeDays: number
-	nowEpochMs: number
-}): ReleaseAgeFilter {
-	if (minReleaseAgeDays <= 0) {
-		return { candidates, events: [] }
-	}
-
-	const filtered: Array<UpdateCandidate> = []
-	const events: Array<ReleaseAgeEvent> = []
-
-	for (const candidate of candidates) {
-		const metadata = packageMetadata.get(candidate.name)
-		const publishTimes = metadata?.publishTimes ?? {}
-
-		const latestPublishTime = publishTimes[candidate.latestVersion]
-		if (!latestPublishTime) {
-			// No publish time data — allow the update (don't block on missing data)
-			filtered.push(candidate)
-			continue
-		}
-
-		const ageDays = getVersionAgeDays({
-			publishTime: latestPublishTime,
-			nowEpochMs
-		})
-		if (ageDays === null || ageDays >= minReleaseAgeDays) {
-			filtered.push(candidate)
-			continue
-		}
-
-		// Latest version is too young — find the best qualifying version
-		const bestVersion = findBestQualifyingVersion({
-			currentVersion: candidate.currentVersion,
-			publishedVersions: metadata?.publishedVersions ?? [],
-			publishTimes,
-			minReleaseAgeDays,
-			isPrerelease: candidate.currentVersion.includes('-'),
-			nowEpochMs
-		})
-
-		if (bestVersion) {
-			const changeType = classifySemverChange({
-				from: candidate.currentVersion,
-				to: bestVersion
-			})
-			if (changeType) {
-				filtered.push({ ...candidate, latestVersion: bestVersion, changeType })
-				events.push({
-					name: candidate.name,
-					message:
-						`    ${candidate.name}: ${candidate.latestVersion} is ${Math.max(0, ageDays).toFixed(0)} day(s) old ` +
-						`(minimum: ${minReleaseAgeDays}), falling back to ${bestVersion}`
-				})
-				continue
-			}
-		}
-
-		events.push({
-			name: candidate.name,
-			message:
-				`    Skipping ${candidate.name} ${candidate.latestVersion}: ` +
-				`published ${Math.max(0, ageDays).toFixed(0)} day(s) ago (minimum: ${minReleaseAgeDays} days)`
-		})
-	}
-
-	return { candidates: filtered, events }
-}
-
-/** Build the release notes section for a PR body. */
-export function formatReleaseNotes({
-	updates,
-	releaseNotes
-}: {
-	updates: Array<UpdateCandidate>
-	releaseNotes: Map<string, Array<VersionReleaseNote>>
-}): Array<string> {
-	const sorted = [...updates].toSorted((a, b) => a.name.localeCompare(b.name))
-	const notesEntries = sorted.filter((u) => releaseNotes.has(u.name))
-
-	if (notesEntries.length === 0) {
-		return []
-	}
-
-	const lines: Array<string> = ['', '## Release Notes', '']
-
-	for (const u of notesEntries) {
-		const versionNotes = releaseNotes.get(u.name)
-		if (!versionNotes || versionNotes.length === 0) {
-			continue
-		}
-
-		const firstNote = versionNotes[0]
-		if (firstNote && versionNotes.length === 1) {
-			lines.push(
-				'<details>',
-				`<summary><b>${u.name}</b> (${u.currentVersion} → ${u.latestVersion})</summary>`,
-				'',
-				firstNote.body,
-				'',
-				'</details>',
-				''
-			)
-		} else {
-			lines.push(
-				'<details>',
-				`<summary><b>${u.name}</b> (${u.currentVersion} → ${u.latestVersion}) — ${versionNotes.length} releases</summary>`,
-				''
-			)
-
-			let cumulativeLength = 0
-			let rendered = 0
-			for (const note of versionNotes) {
-				if (
-					cumulativeLength + note.body.length >
-					COMBINED_RELEASE_NOTES_MAX_LENGTH
-				) {
-					const remaining = versionNotes.length - rendered
-					lines.push(
-						`<p><i>…and ${remaining} more release(s) not shown</i></p>`,
-						''
-					)
-					break
-				}
-
-				lines.push(
-					'<details>',
-					`<summary><b>${note.version}</b></summary>`,
-					'',
-					note.body,
-					'',
-					'</details>',
-					''
-				)
-				cumulativeLength += note.body.length
-				rendered++
-			}
-
-			lines.push('</details>', '')
-		}
-	}
-
-	return lines
 }

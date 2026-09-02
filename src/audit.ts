@@ -33,12 +33,13 @@ const SEVERITY_ORDER = {
 
 /**
  * Runs the provider's audit command and returns parsed results, or `None`
- * when the audit could not be executed/parsed. An empty (clean) result is
+ * when the audit output could not be parsed. An empty (clean) result is
  * valid.
  *
  * Uses the silent Commands service rather than the logging wrapper because
  * audit tools return a non-zero exit code when vulnerabilities are found,
- * which is the expected (successful) case.
+ * which is the expected (successful) case. A missing audit binary dies at
+ * the Commands adapter — there is no output to interpret.
  */
 export const runAudit = Effect.fn('Audit.runAudit')(function* ({
 	cwd,
@@ -48,19 +49,10 @@ export const runAudit = Effect.fn('Audit.runAudit')(function* ({
 	audit: AuditCapability
 }) {
 	const commands = yield* Commands
-	const result = yield* commands
-		.exec(audit.command, { cwd })
-		.pipe(Effect.option)
-
-	if (Option.isNone(result)) {
-		yield* Effect.logWarning(
-			`  Failed to run ${audit.command.join(' ')}: command unavailable`
-		)
-		return Option.none()
-	}
+	const result = yield* commands.exec(audit.command, { cwd })
 
 	const toolName = audit.command.at(0)
-	const output = (result.value.stdout || result.value.stderr).trim()
+	const output = (result.stdout || result.stderr).trim()
 	if (!output) {
 		// Clean audits may legitimately print nothing (e.g. yarn NDJSON).
 		return Option.some({})
@@ -207,11 +199,15 @@ export function computeOverrides({
 			const existing = groupMap.get(groupKey)
 
 			if (existing) {
-				existing.advisories.push(advisory)
 				// Keep the highest fixed version within the group
-				if (compareSemver({ a: fixed, b: existing.fixedVersion }) > 0) {
-					existing.fixedVersion = fixed
-				}
+				groupMap.set(groupKey, {
+					...existing,
+					advisories: [...existing.advisories, advisory],
+					fixedVersion:
+						compareSemver({ a: fixed, b: existing.fixedVersion }) > 0
+							? fixed
+							: existing.fixedVersion
+				})
 			} else {
 				groupMap.set(groupKey, {
 					packageName,

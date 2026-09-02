@@ -48,25 +48,28 @@ function parseYarnAuditOutput({
 		if (Option.isNone(raw)) {
 			continue
 		}
-		const parsed = Schema.decodeUnknownResult(yarnAuditLineSchema)(raw.value)
-		if (parsed._tag === 'Failure') {
+		const parsed = Schema.decodeUnknownOption(yarnAuditLineSchema)(raw.value)
+		if (Option.isNone(parsed)) {
 			continue
 		}
-		const severity = parseSeverity({ raw: parsed.success.children.Severity })
+		const severity = parseSeverity({
+			raw: parsed.value.children.Severity
+		})
 		if (Option.isNone(severity)) {
 			continue
 		}
 		parsedCount++
-		const advisory = parsed.success
-		const advisories = result[advisory.value] ?? []
-		advisories.push({
-			id: Number(advisory.children.ID),
-			url: advisory.children.URL,
-			title: advisory.children.Issue,
-			severity: severity.value,
-			vulnerable_versions: advisory.children['Vulnerable Versions']
-		})
-		result[advisory.value] = advisories
+		const advisory = parsed.value
+		result[advisory.value] = [
+			...(result[advisory.value] ?? []),
+			{
+				id: Number(advisory.children.ID),
+				url: advisory.children.URL,
+				title: advisory.children.Issue,
+				severity: severity.value,
+				vulnerable_versions: advisory.children['Vulnerable Versions']
+			}
+		]
 	}
 
 	// Lines existed but none matched the expected shape — treat the whole

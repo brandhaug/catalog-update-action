@@ -1,8 +1,10 @@
 import { Effect, FileSystem, Option, Schema } from 'effect'
 
 import {
+	mergeMethodSchema,
 	parseJsonDocument,
 	readJsonObject,
+	semverChangeSchema,
 	severitySchema,
 	type JsonValue
 } from './schemas'
@@ -37,14 +39,6 @@ const DEFAULT_CONFIG: Config = {
 	autoMerge: DEFAULT_AUTO_MERGE_CONFIG
 }
 
-const semverChangeSchema = Schema.Literals([
-	'major',
-	'minor',
-	'patch',
-	'prerelease',
-	'release'
-])
-const mergeMethodSchema = Schema.Literals(['squash', 'merge', 'rebase'])
 /** Whole, non-negative number of days. */
 const nonNegativeIntSchema = Schema.Number.check(
 	Schema.isInt(),

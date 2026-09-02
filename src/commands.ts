@@ -7,8 +7,11 @@ import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 // Types
 // ---------------------------------------------------------------------------
 
-/** Collected result of a finished command, whether or not it exited cleanly. */
-export type CommandResult = {
+/**
+ * Collected result of a finished command, whether or not it exited cleanly.
+ * Module-local: consumers reach it through the Commands service interface.
+ */
+type CommandResult = {
 	stdout: string
 	stderr: string
 	exitCode: number
@@ -31,7 +34,9 @@ const collectText = Effect.fnUntraced(function* (
  *
  * The service is silent by design: a non-zero exit is data, not a failure.
  * Workflows decide whether a given exit code is expected and log accordingly —
- * audits legitimately exit non-zero when vulnerabilities are found.
+ * audits legitimately exit non-zero when vulnerabilities are found. Spawn
+ * failures (missing binary, unwritable cwd) are defects: there is no exit
+ * code to branch on, so they crash the run rather than masquerade as data.
  */
 export class Commands extends Context.Service<
 	Commands,
@@ -39,7 +44,7 @@ export class Commands extends Context.Service<
 		exec(
 			command: Array<string>,
 			options: { readonly cwd: string }
-		): Effect.Effect<CommandResult, PlatformError>
+		): Effect.Effect<CommandResult>
 	}
 >()('catalog-update/Commands') {
 	static readonly layer = Layer.effect(
@@ -80,7 +85,8 @@ export class Commands extends Context.Service<
 					// A spawn failure (missing binary, unwritable cwd) is a defect, not
 					// a workflow failure: there is no meaningful exit code to branch
 					// on. It surfaces as a fatal error at the top-level boundary,
-					// exactly like the unhandled Bun.spawn throw this replaced.
+					// exactly like the unhandled Bun.spawn throw this replaced —
+					// which is why exec's error channel is empty by contract.
 					Effect.orDie
 				)
 			})

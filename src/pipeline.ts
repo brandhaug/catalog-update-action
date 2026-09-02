@@ -16,7 +16,8 @@ import {
 } from './git'
 import { getProvider, type ParsedCatalog } from './providers'
 import { shouldIgnore, assignToGroups } from './groups'
-import { Registry, filterByReleaseAge } from './registry'
+import { Registry } from './registry'
+import { filterByReleaseAge } from './release-age'
 import { classifySemverChange, getOverrideBranchPrefix } from './utils'
 import {
 	type BranchUpdate,
@@ -45,6 +46,35 @@ type DirectoryRun = {
 	location: CatalogLocation
 	titleSuffix: string
 	effectiveBranchPrefix: string
+}
+
+/**
+ * DirectoryRun plus the computed update artifacts (stage 5/5b output) that
+ * the PR sync and creation stages share.
+ */
+type CatalogRun = DirectoryRun & {
+	groups: Map<string, Array<UpdateCandidate>>
+	releaseNotes: Map<string, Array<VersionReleaseNote>>
+	overrideBranchUpdate: BranchUpdate | null
+	overrideEntries: Array<OverrideEntry>
+}
+
+/**
+ * The catalog BranchUpdate builder for one run, shared by the sync and
+ * create stages so both derive branches, titles and bodies identically.
+ */
+function makeCatalogBranchBuilder(catalog: CatalogRun) {
+	return (groupName: string, updates: Array<UpdateCandidate>) =>
+		buildCatalogBranchUpdate({
+			groupName,
+			updates,
+			config: catalog.config,
+			location: catalog.location,
+			workDir: catalog.dir.workDir,
+			titleSuffix: catalog.titleSuffix,
+			branchPrefix: catalog.effectiveBranchPrefix,
+			releaseNotes: catalog.releaseNotes
+		})
 }
 
 function buildDirectoryContext({
@@ -305,49 +335,16 @@ const findOverrideUpdates = Effect.fn('Pipeline.findOverrideUpdates')(
 	}
 )
 
-function groupNameFromBranch({
-	branchName,
-	branchPrefix
-}: {
-	branchName: string
-	branchPrefix: string
-}): string {
-	return branchName.slice(`${branchPrefix}/`.length)
-}
-
 const syncDirectoryPrs = Effect.fn('Pipeline.syncDirectoryPrs')(function* ({
-	run,
-	existingPrs,
-	groups,
-	releaseNotes,
-	overrideBranchUpdate,
-	overrideEntries
+	catalog,
+	existingPrs
 }: {
-	run: DirectoryRun
+	catalog: CatalogRun
 	existingPrs: Array<ExistingPr>
-	groups: Map<string, Array<UpdateCandidate>>
-	releaseNotes: Map<string, Array<VersionReleaseNote>>
-	overrideBranchUpdate: BranchUpdate | null
-	overrideEntries: Array<OverrideEntry>
 }) {
-	const { dir, config, location, effectiveBranchPrefix } = run
-
-	// Catalog PR branches and bodies derive from the same per-location context
-	// in every stage below.
-	const buildBranchUpdate = (
-		groupName: string,
-		updates: Array<UpdateCandidate>
-	) =>
-		buildCatalogBranchUpdate({
-			groupName,
-			updates,
-			config,
-			location,
-			workDir: dir.workDir,
-			titleSuffix: run.titleSuffix,
-			branchPrefix: effectiveBranchPrefix,
-			releaseNotes
-		})
+	const { dir, config, location, effectiveBranchPrefix } = catalog
+	const provider = getProvider(location.providerId)
+	const buildBranchUpdate = makeCatalogBranchBuilder(catalog)
 
 	const overrideBranchPrefix = getOverrideBranchPrefix({
 		branchPrefix: effectiveBranchPrefix
@@ -363,44 +360,37 @@ const syncDirectoryPrs = Effect.fn('Pipeline.syncDirectoryPrs')(function* ({
 	yield* Effect.logInfo('  Syncing existing catalog PRs...')
 	const catalogSyncResult = yield* syncExistingPrs({
 		existingPrs: catalogPrs,
-		resolveBranchUpdate: (branchName: string) => {
-			const groupName = groupNameFromBranch({
-				branchName,
-				branchPrefix: effectiveBranchPrefix
-			})
-			const updates = groups.get(groupName)
+		// Catalog branches are `${prefix}/${groupName}` by construction, so
+		// one slice recovers the group and its updates. The drift check
+		// closes over both instead of re-deriving them from branch strings.
+		resolveSyncPlan: (pr) => {
+			const groupName = pr.headRefName.slice(`${effectiveBranchPrefix}/`.length)
+			const updates = catalog.groups.get(groupName)
 			if (!updates || updates.length === 0) {
 				return null
 			}
-			return buildBranchUpdate(groupName, updates)
-		},
-		isBranchOutdated: ({ branchUpdate, branchFiles }) => {
-			const definitionContent = branchFiles.get(location.definitionRelPath)
-			if (definitionContent === null || definitionContent === undefined) {
-				return true
+			return {
+				branchUpdate: buildBranchUpdate(groupName, updates),
+				isOutdated: ({ branchFiles }) => {
+					const definitionContent = branchFiles.get(location.definitionRelPath)
+					if (definitionContent === null || definitionContent === undefined) {
+						return true
+					}
+					const definitions = provider.parseDefinitions({
+						content: definitionContent
+					})
+					const definition = definitions.find(
+						(d) => d.catalogName === location.definition.catalogName
+					)
+					if (!definition) {
+						return true
+					}
+					return updates.some(
+						(update) =>
+							definition.entries[update.name] !== buildCatalogValue({ update })
+					)
+				}
 			}
-			const groupName = groupNameFromBranch({
-				branchName: branchUpdate.branch,
-				branchPrefix: effectiveBranchPrefix
-			})
-			const updates = groups.get(groupName)
-			if (!updates || updates.length === 0) {
-				return true
-			}
-			const provider = getProvider(location.providerId)
-			const definitions = provider.parseDefinitions({
-				content: definitionContent
-			})
-			const definition = definitions.find(
-				(d) => d.catalogName === location.definition.catalogName
-			)
-			if (!definition) {
-				return true
-			}
-			return updates.some(
-				(update) =>
-					definition.entries[update.name] !== buildCatalogValue({ update })
-			)
 		},
 		config,
 		dir
@@ -410,17 +400,21 @@ const syncDirectoryPrs = Effect.fn('Pipeline.syncDirectoryPrs')(function* ({
 	let overrideSyncResult = { closedCount: 0, rebuiltCount: 0 }
 	if (overridePrs.length > 0) {
 		yield* Effect.logInfo('  Syncing existing override PRs...')
-		const { audit } = getProvider(location.providerId)
+		const { audit } = provider
 		overrideSyncResult = yield* syncExistingPrs({
 			existingPrs: overridePrs,
-			resolveBranchUpdate: (_branchName: string) => overrideBranchUpdate,
-			isBranchOutdated: ({ branchFiles }) => {
-				return isOverrideBranchOutdated({
-					branchFiles,
-					audit,
-					expectedOverrides: overrideEntries
-				})
-			},
+			resolveSyncPlan: () =>
+				catalog.overrideBranchUpdate === null
+					? null
+					: {
+							branchUpdate: catalog.overrideBranchUpdate,
+							isOutdated: ({ branchFiles }) =>
+								isOverrideBranchOutdated({
+									branchFiles,
+									audit,
+									expectedOverrides: catalog.overrideEntries
+								})
+						},
 			config,
 			dir
 		})
@@ -434,55 +428,37 @@ const syncDirectoryPrs = Effect.fn('Pipeline.syncDirectoryPrs')(function* ({
 })
 
 const createDirectoryPrs = Effect.fn('Pipeline.createDirectoryPrs')(function* ({
-	run,
+	catalog,
 	existingPrs,
-	closedCount,
-	groups,
-	releaseNotes,
-	overrideBranchUpdate
+	closedCount
 }: {
-	run: DirectoryRun
+	catalog: CatalogRun
 	existingPrs: Array<ExistingPr>
 	closedCount: number
-	groups: Map<string, Array<UpdateCandidate>>
-	releaseNotes: Map<string, Array<VersionReleaseNote>>
-	overrideBranchUpdate: BranchUpdate | null
 }) {
-	const { dir, config, effectiveBranchPrefix } = run
-
-	const buildBranchUpdate = (
-		groupName: string,
-		updates: Array<UpdateCandidate>
-	) =>
-		buildCatalogBranchUpdate({
-			groupName,
-			updates,
-			config,
-			location: run.location,
-			workDir: dir.workDir,
-			titleSuffix: run.titleSuffix,
-			branchPrefix: effectiveBranchPrefix,
-			releaseNotes
-		})
+	const { dir, config, effectiveBranchPrefix } = catalog
+	const { overrideBranchUpdate, groups } = catalog
+	const buildBranchUpdate = makeCatalogBranchBuilder(catalog)
 
 	const existingBranches = new Set(existingPrs.map((pr) => pr.headRefName))
-	const adjustedExistingCount = existingPrs.length - closedCount
-	const availableSlots = config.maxOpenPrs - adjustedExistingCount
+	// openPrCount is the single budget counter: closed PRs free their slot,
+	// each successful creation takes one.
+	let openPrCount = existingPrs.length - closedCount
 
 	yield* Effect.logInfo(
-		`  PR limit: ${config.maxOpenPrs}, existing: ${adjustedExistingCount}, available slots: ${availableSlots}`
+		`  PR limit: ${config.maxOpenPrs}, existing: ${openPrCount}, available slots: ${config.maxOpenPrs - openPrCount}`
 	)
 
 	let created = 0
-	let openPrCount = adjustedExistingCount
-	let available = availableSlots
+	let attempted = 0
 
 	// Override PR first (security priority)
 	if (
 		overrideBranchUpdate &&
-		available > 0 &&
+		openPrCount < config.maxOpenPrs &&
 		!existingBranches.has(overrideBranchUpdate.branch)
 	) {
+		attempted++
 		const success = yield* createPr({
 			branchUpdate: overrideBranchUpdate,
 			config,
@@ -491,19 +467,12 @@ const createDirectoryPrs = Effect.fn('Pipeline.createDirectoryPrs')(function* ({
 		if (success) {
 			created++
 			openPrCount++
-			available--
 		}
 	}
 
-	// Catalog PRs
-	const skippedGroups = [...groups.keys()].filter((name) =>
-		existingBranches.has(`${effectiveBranchPrefix}/${name}`)
-	)
-	const eligibleGroups = groups.size - skippedGroups.length
-	const prsToCreate = Math.min(eligibleGroups, available)
-
-	// Each createPr checks out, installs, commits and force-pushes its own
-	// branch in the shared working tree, so PRs are created one at a time.
+	// Catalog PRs. Each createPr checks out, installs, commits and
+	// force-pushes its own branch in the shared working tree, so PRs are
+	// created one at a time.
 	for (const [groupName, updates] of groups) {
 		if (openPrCount >= config.maxOpenPrs) {
 			yield* Effect.logInfo(
@@ -517,20 +486,22 @@ const createDirectoryPrs = Effect.fn('Pipeline.createDirectoryPrs')(function* ({
 			continue
 		}
 
-		const branchUpdate = buildBranchUpdate(groupName, updates)
-		const success = yield* createPr({ branchUpdate, config, dir })
+		attempted++
+		const success = yield* createPr({
+			branchUpdate: buildBranchUpdate(groupName, updates),
+			config,
+			dir
+		})
 		if (success) {
 			created++
 			openPrCount++
 		}
 	}
 
-	const totalExpected =
-		prsToCreate +
-		(overrideBranchUpdate && !existingBranches.has(overrideBranchUpdate.branch)
-			? 1
-			: 0)
-	const failed = totalExpected - created
+	// Counting attempts rather than a pre-computed expectation: a failed
+	// creation frees its slot for a later group, but the failure itself must
+	// still surface in the summary.
+	const failed = attempted - created
 
 	return { created, failed }
 })
@@ -644,6 +615,15 @@ export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 		return { created: 0, failed: 0, rebuilt: 0 }
 	}
 
+	// Everything the PR stages share, now that the update artifacts exist.
+	const catalog: CatalogRun = {
+		...run,
+		groups,
+		releaseNotes,
+		overrideBranchUpdate,
+		overrideEntries
+	}
+
 	// 6–6c. Sync existing PRs
 	yield* Effect.logInfo('  Checking existing PRs...')
 	const existingPrs = yield* getExistingPrs({
@@ -655,22 +635,15 @@ export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 	)
 
 	const { closedCount, rebuiltCount } = yield* syncDirectoryPrs({
-		run,
-		existingPrs,
-		groups,
-		releaseNotes,
-		overrideBranchUpdate,
-		overrideEntries
+		catalog,
+		existingPrs
 	})
 
 	// 7. Create PRs
 	const { created, failed } = yield* createDirectoryPrs({
-		run,
+		catalog,
 		existingPrs,
-		closedCount,
-		groups,
-		releaseNotes,
-		overrideBranchUpdate
+		closedCount
 	})
 
 	return { created, failed, rebuilt: rebuiltCount }

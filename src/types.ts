@@ -1,14 +1,17 @@
 import { Schema, type Effect, type FileSystem } from 'effect'
 import { type ParsedCatalog, type ProviderId } from './providers'
-import { type Severity } from './schemas'
-export type { Severity } from './schemas'
-
-export type SemverChange =
-	| 'major'
-	| 'minor'
-	| 'patch'
-	| 'prerelease'
-	| 'release'
+import {
+	type MergeableState,
+	type MergeMethod,
+	type SemverChange,
+	type Severity
+} from './schemas'
+export type {
+	MergeableState,
+	MergeMethod,
+	SemverChange,
+	Severity
+} from './schemas'
 
 // ---------------------------------------------------------------------------
 // Audit types
@@ -21,17 +24,17 @@ export type AuditAdvisory = {
 	severity: Severity
 	vulnerable_versions: string
 	/** Not reported by every audit tool (e.g. Yarn omits it). */
-	cwe?: Array<string>
-	cvss?: { score: number; vectorString: string }
+	cwe?: ReadonlyArray<string>
+	cvss?: { readonly score: number; readonly vectorString: string }
 }
 
-export type AuditResult = Record<string, Array<AuditAdvisory>>
+export type AuditResult = Record<string, ReadonlyArray<AuditAdvisory>>
 
 export type OverrideEntry = {
 	packageName: string
 	vulnerableRange: string
 	fixedVersion: string
-	advisories: Array<AuditAdvisory>
+	advisories: ReadonlyArray<AuditAdvisory>
 	/** True when an override already exists in package.json but bun audit still reports the vulnerability (stale lockfile). */
 	existingOverrideStale?: boolean
 }
@@ -89,7 +92,8 @@ export type BranchUpdate = {
 	 */
 	expectedBasenames: Array<string>
 	/** Writes the update into the checked-out working tree. */
-	apply: Effect.Effect<void, BranchApplyError, FileSystem.FileSystem> /**
+	apply: Effect.Effect<void, BranchApplyError, FileSystem.FileSystem>
+	/**
 	 * Lockfiles (workDir-relative) to delete before running install, forcing
 	 * full re-resolution. Needed for override branches because range-based
 	 * overrides are ignored for already-locked packages.
@@ -97,6 +101,20 @@ export type BranchUpdate = {
 	deleteLockfiles?: Array<string>
 	/** Install command refreshing the lockfile after applying the update. */
 	installCommand: Array<string>
+}
+
+/**
+ * The sync decision for one existing PR: the update the branch should carry,
+ * and how to tell whether the branch's checked-out content has drifted from
+ * it. One callback returning the pair, so callers compute the group context
+ * once instead of re-deriving it from branch-name strings.
+ */
+export type PrSyncPlan = {
+	branchUpdate: BranchUpdate
+	isOutdated(input: {
+		/** Content of each affected file on the branch (null when absent) */
+		branchFiles: Map<string, string | null>
+	}): boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -139,7 +157,7 @@ export type IgnoreRule = {
 export type ExistingPr = {
 	headRefName: string
 	number: number
-	mergeable: 'MERGEABLE' | 'CONFLICTING' | 'UNKNOWN'
+	mergeable: MergeableState
 	title: string
 }
 
@@ -159,8 +177,6 @@ export type VersionReleaseNote = {
 	version: string
 	body: string
 }
-
-export type MergeMethod = 'squash' | 'merge' | 'rebase'
 
 export type AutoMergeConfig = {
 	enabled: boolean

@@ -6,7 +6,7 @@ GitHub Action + CLI (`catalog-update`) that automates dependency updates for the
 
 Runs directly from `src/` via Bun — no build step. Published to npm as `catalog-update-action`; requires **Bun >= 1.4.0**. The action is dogfooded by this repo's own `.github/workflows/catalog-update.yml` (`uses: ./`, daily schedule).
 
-The codebase is written in **Effect v4** (`effect@4.0.0-rc` + `@effect/platform-bun`, pinned exact): workflows are `Effect.gen`/`Effect.fn`, errors are typed `Schema.TaggedError`s, and all I/O goes through services — `Commands` (git/gh/install/audit via `ChildProcessSpawner`), `FileSystem`, `Registry` (npm/GitHub HTTP via `HttpClient`), with a plain-text `Logger` layer so CLI output stays human-readable. zod is gone; every boundary is decoded with Effect `Schema` (`Schema.decodeUnknownResult`/`Option`/`Effect`). Providers (`src/providers/`) stay deliberately pure string→string functions; their throws are mapped into `BranchApplyError` by the apply adapters.
+The codebase is written in **Effect v4** (`effect@4.0.0-rc` + `@effect/platform-bun`, pinned exact): workflows are `Effect.gen`/`Effect.fn`, errors are typed `Schema.TaggedError`s, and all I/O goes through services — `Commands` (git/gh/install/audit via `ChildProcessSpawner`), `FileSystem`, `Registry` (npm/GitHub HTTP via `HttpClient`), with a plain-text `Logger` layer so CLI output stays human-readable. zod is gone; every boundary is decoded with Effect `Schema` (`Schema.decodeUnknownOption`/`Effect`), and each literal vocabulary (severity, semver change, mergeable state, merge method) is one schema with a derived type in `src/schemas.ts`. Providers (`src/providers/`) stay deliberately pure string→string functions; their throws are mapped into `BranchApplyError` by the apply adapters.
 
 ## Commands
 
@@ -30,9 +30,11 @@ oxlint (type-aware) + oxfmt, configured in `.oxlintrc.json` / `.oxfmtrc.json`. T
 
 ```
 src/                       # TypeScript source (entry: main.ts)
-src/commands.ts            # Commands service — exec adapter over ChildProcessSpawner (silent; exit code is data)
+src/commands.ts            # Commands service — exec adapter over ChildProcessSpawner (silent; exit code is data, spawn failures are defects)
 src/logging.ts             # Plain-text logger layer (info→stdout, warn/error→stderr)
-src/registry.ts            # Registry service — npm registry + GitHub releases over HttpClient, plus pure release-age helpers
+src/registry.ts            # Registry service — npm registry + GitHub releases over HttpClient
+src/release-age.ts         # Pure release-age quarantine policy (minReleaseAgeDays filtering)
+src/release-notes.ts       # Pure release-note clamping + PR-body rendering
 src/git.ts, src/audit.ts   # git/gh and audit workflows over Commands + FileSystem
 src/pipeline.ts            # processCatalog — per-location orchestration
 src/providers/             # Per-manager catalog adapters (bun, pnpm, yarn) — parsing, install, audit capability

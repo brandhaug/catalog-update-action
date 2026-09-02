@@ -1,7 +1,7 @@
 import { Effect, FileSystem, Option, Schema } from 'effect'
 import { Commands } from './commands'
-import { formatReleaseNotes } from './registry'
-import { parseJsonDocument } from './schemas'
+import { formatReleaseNotes } from './release-notes'
+import { mergeableSchema, parseJsonDocument } from './schemas'
 import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
 import { expectedInstallBasenames, getProvider } from './providers'
 import {
@@ -11,6 +11,7 @@ import {
 	type Config,
 	type DirectoryContext,
 	type ExistingPr,
+	type PrSyncPlan,
 	type UpdateCandidate,
 	type VersionReleaseNote
 } from './types'
@@ -20,11 +21,13 @@ import {
 // ---------------------------------------------------------------------------
 
 /** Fatal git workflow failure: the working tree could not be restored. */
+// Module-local on purpose: main.ts recovers via Effect.catchTag('GitError'),
+// so the class has no importer — its tag and shape are the contract.
 // Schema.TaggedError declarations are class declarations, not throw sites;
 // unicorn/throw-new-error misreads the TaggedError() constructor call as an
 // un-newed throw.
 // oxlint-disable-next-line unicorn/throw-new-error
-export class GitError extends Schema.TaggedError<GitError>()('GitError', {
+class GitError extends Schema.TaggedError<GitError>()('GitError', {
 	operation: Schema.String,
 	cause: Schema.Defect()
 }) {}
@@ -141,8 +144,6 @@ export function buildCatalogBranchUpdate({
 // Existing PRs
 // ---------------------------------------------------------------------------
 
-const mergeableSchema = Schema.Literals(['MERGEABLE', 'CONFLICTING', 'UNKNOWN'])
-
 /** Validate a `gh pr list --json` item before trusting its fields. */
 const existingPrSchema = Schema.Struct({
 	headRefName: Schema.String,
@@ -167,13 +168,13 @@ const prApiCommitsSchema = Schema.Array(
  * ignored regardless of author.
  */
 export function hasHumanContentCommits({ raw }: { raw: unknown }): boolean {
-	const parsed = Schema.decodeUnknownResult(prApiCommitsSchema)(raw)
+	const commits = Schema.decodeUnknownOption(prApiCommitsSchema)(raw)
 	// Any malformed shape or non-bot author means the PR may carry human
 	// work, so it is treated as "has human content commits" and left alone.
-	if (parsed._tag === 'Failure') {
+	if (Option.isNone(commits)) {
 		return true
 	}
-	return parsed.success.some(
+	return commits.value.some(
 		(commit) =>
 			(commit.parents ?? []).length < 2 &&
 			commit.author?.login !== 'github-actions[bot]'
@@ -205,18 +206,27 @@ export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 		{ cwd }
 	)
 
+	// This list is the run's idempotency anchor: believing "no existing PRs"
+	// on a malformed payload would make the run create duplicates, so a bad
+	// payload is warned about loudly rather than swallowed.
 	const parsed = parseJsonDocument(result.stdout || '[]')
 	if (Option.isNone(parsed)) {
+		yield* Effect.logWarning(
+			`  Warning: existing-PR list for prefix "${branchPrefix}" was not valid JSON; treating as none`
+		)
 		return []
 	}
 
-	const decoded = Schema.decodeUnknownResult(Schema.Array(existingPrSchema))(
+	const decoded = Schema.decodeUnknownOption(Schema.Array(existingPrSchema))(
 		parsed.value
 	)
-	if (decoded._tag === 'Failure') {
+	if (Option.isNone(decoded)) {
+		yield* Effect.logWarning(
+			`  Warning: existing-PR list for prefix "${branchPrefix}" had an unexpected shape; treating as none`
+		)
 		return []
 	}
-	return decoded.success.filter(
+	return decoded.value.filter(
 		(pr) =>
 			pr.headRefName.startsWith(`${branchPrefix}/`) ||
 			pr.headRefName.startsWith(`${getOverrideBranchPrefix({ branchPrefix })}/`)
@@ -288,13 +298,13 @@ const resolveMergeableState = Effect.fn('Git.resolveMergeableState')(
 		if (Option.isNone(option)) {
 			return 'UNKNOWN'
 		}
-		const decoded = Schema.decodeUnknownResult(mergeableStateSchema)(
+		const decoded = Schema.decodeUnknownOption(mergeableStateSchema)(
 			option.value
 		)
-		if (decoded._tag === 'Failure') {
+		if (Option.isNone(decoded)) {
 			return 'UNKNOWN'
 		}
-		return decoded.success.mergeable
+		return decoded.value.mergeable
 	}
 )
 
@@ -619,18 +629,12 @@ export const createPr = Effect.fn('Git.createPr')(function* ({
 
 export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 	existingPrs,
-	resolveBranchUpdate,
-	isBranchOutdated,
+	resolveSyncPlan,
 	config,
 	dir
 }: {
 	existingPrs: Array<ExistingPr>
-	resolveBranchUpdate: (branchName: string) => BranchUpdate | null
-	isBranchOutdated: (input: {
-		branchUpdate: BranchUpdate
-		/** Content of each affected file on the branch (null when absent) */
-		branchFiles: Map<string, string | null>
-	}) => boolean
+	resolveSyncPlan: (pr: ExistingPr) => PrSyncPlan | null
 	config: Config
 	dir: DirectoryContext
 }) {
@@ -644,19 +648,13 @@ export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 	const commands = yield* Commands
 
 	// Commit authorship checks are independent read-only queries, so they run
-	// concurrently ahead of the sequential sync loop.
+	// concurrently ahead of the sequential sync loop. Effect.forEach returns
+	// one flag per PR, in order.
 	const nonBotFlags = yield* Effect.forEach(
 		existingPrs,
 		(pr) => hasNonBotCommits({ pr, cwd: dir.cwd }),
 		{ concurrency: 'unbounded' }
 	)
-	const nonBotResults = new Map<number, boolean>()
-	for (const [index, pr] of existingPrs.entries()) {
-		const flag = nonBotFlags[index]
-		if (flag !== undefined) {
-			nonBotResults.set(pr.number, flag)
-		}
-	}
 
 	let closedCount = 0
 	let rebuiltCount = 0
@@ -664,17 +662,17 @@ export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 	// Each iteration mutates the shared working tree (git checkout, install,
 	// commit, push) and can touch the same branches as the others, so PRs must
 	// be processed one at a time rather than in parallel.
-	for (const pr of existingPrs) {
-		if (nonBotResults.get(pr.number)) {
+	for (const [index, pr] of existingPrs.entries()) {
+		if (nonBotFlags[index] === true) {
 			yield* Effect.logInfo(
 				`  Skipping PR #${pr.number} — has human-authored content commits`
 			)
 			continue
 		}
 
-		const branchUpdate = resolveBranchUpdate(pr.headRefName)
+		const plan = resolveSyncPlan(pr)
 
-		if (!branchUpdate) {
+		if (!plan) {
 			yield* Effect.logInfo(
 				`  Closing stale PR #${pr.number} — no longer needed`
 			)
@@ -694,6 +692,9 @@ export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 			}
 			continue
 		}
+
+		// Not destructured: isOutdated is a method on the plan object.
+		const branchUpdate = plan.branchUpdate
 
 		const mergeable = yield* resolveMergeableState({ pr, cwd: dir.cwd })
 		const isConflicting = mergeable === 'CONFLICTING'
@@ -717,7 +718,7 @@ export const syncExistingPrs = Effect.fn('Git.syncExistingPrs')(function* ({
 				})
 				branchFiles.set(relPath, content)
 			}
-			hasContentChanges = isBranchOutdated({ branchUpdate, branchFiles })
+			hasContentChanges = plan.isOutdated({ branchFiles })
 		}
 
 		if (!isConflicting && !behindDefault && !hasContentChanges) {

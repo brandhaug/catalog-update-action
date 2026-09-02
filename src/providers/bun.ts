@@ -203,28 +203,14 @@ function parseBunAuditOutput({
 	if (Option.isNone(parsed)) {
 		return null
 	}
-	const result = Schema.decodeUnknownResult(bunAuditResultSchema)(parsed.value)
-	if (result._tag === 'Failure') {
+	const result = Schema.decodeUnknownOption(bunAuditResultSchema)(parsed.value)
+	if (Option.isNone(result)) {
 		return null
 	}
-	// Schema records and arrays are readonly; the pipeline builds mutable
-	// advisory lists.
-	const auditResult: AuditResult = {}
-	for (const [packageName, advisories] of Object.entries(result.success)) {
-		auditResult[packageName] = advisories.map((advisory) => ({
-			id: advisory.id,
-			url: advisory.url,
-			title: advisory.title,
-			severity: advisory.severity,
-			vulnerable_versions: advisory.vulnerable_versions,
-			cwe: [...advisory.cwe],
-			cvss: {
-				score: advisory.cvss.score,
-				vectorString: advisory.cvss.vectorString
-			}
-		}))
-	}
-	return auditResult
+	// bun always reports cwe and cvss, which are optional on AuditAdvisory,
+	// so the decoded advisory records are already the right shape. The
+	// spread just drops the schema's readonly top-level record.
+	return { ...result.value }
 }
 
 export const bunAudit: AuditCapability = {

@@ -42,24 +42,28 @@ function parsePnpmAuditOutput({
 	if (Option.isNone(parsed)) {
 		return null
 	}
-	const result = Schema.decodeUnknownResult(pnpmAuditOutputSchema)(parsed.value)
-	if (result._tag === 'Failure') {
+	const result = Schema.decodeUnknownOption(pnpmAuditOutputSchema)(parsed.value)
+	if (Option.isNone(result)) {
 		return null
 	}
 
+	// The npm-6-style output is keyed by advisory id; regroup by module name.
+	// The id may arrive as a string, and cwe/cvss are optional — the only
+	// field-level normalization any provider actually needs.
 	const auditResult: AuditResult = {}
-	for (const advisory of Object.values(result.success.advisories)) {
-		const advisories = auditResult[advisory.module_name] ?? []
-		advisories.push({
-			id: Number(advisory.id),
-			url: advisory.url,
-			title: advisory.title,
-			severity: advisory.severity,
-			vulnerable_versions: advisory.vulnerable_versions,
-			cwe: advisory.cwe === undefined ? undefined : [...advisory.cwe],
-			cvss: advisory.cvss === undefined ? undefined : { ...advisory.cvss }
-		})
-		auditResult[advisory.module_name] = advisories
+	for (const advisory of Object.values(result.value.advisories)) {
+		auditResult[advisory.module_name] = [
+			...(auditResult[advisory.module_name] ?? []),
+			{
+				id: Number(advisory.id),
+				url: advisory.url,
+				title: advisory.title,
+				severity: advisory.severity,
+				vulnerable_versions: advisory.vulnerable_versions,
+				cwe: advisory.cwe,
+				cvss: advisory.cvss
+			}
+		]
 	}
 	return auditResult
 }

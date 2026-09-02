@@ -230,6 +230,27 @@ export function getIntermediateVersions({
 	return intermediate
 }
 
+/**
+ * The highest version for which `qualifies` holds, or null when none does.
+ * The single max-scan behind every "best version" decision: prerelease
+ * resolution and release-age fallbacks both delegate here.
+ */
+export function highestVersionWhere(
+	versions: Iterable<string>,
+	qualifies: (version: string) => boolean
+): string | null {
+	let best: string | null = null
+	for (const version of versions) {
+		if (!qualifies(version)) {
+			continue
+		}
+		if (!best || compareSemver({ a: best, b: version }) < 0) {
+			best = version
+		}
+	}
+	return best
+}
+
 // ---------------------------------------------------------------------------
 // Shared constants
 // ---------------------------------------------------------------------------
