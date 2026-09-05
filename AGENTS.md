@@ -4,7 +4,7 @@
 
 GitHub Action + CLI (`catalog-update`) that automates dependency updates for the `catalog:` protocol in monorepos — supports Bun, pnpm, and Yarn catalogs. Queries npm for latest versions, groups updates into batches, creates/syncs PRs via GitHub CLI, and detects vulnerable transitive dependencies via each manager's audit (`bun audit`, `pnpm audit`, `yarn npm audit`). Replaces Dependabot for catalog-based workspaces.
 
-Runs directly from `src/` via Bun — no build step. Published to npm as `catalog-update-action`; requires **Bun >= 1.4.0**. The action is dogfooded by this repo's own `.github/workflows/catalog-update.yml` (`uses: ./`, daily schedule).
+Runs directly from `src/` via Bun — no build step. Published to npm as `catalog-update-action`; requires **Bun >= 1.4.2**. The action is dogfooded by this repo's own `.github/workflows/catalog-update.yml` (`uses: ./`, daily schedule).
 
 The codebase is written in **Effect v4** (`effect@4.0.0-rc` + `@effect/platform-bun`, pinned exact): workflows are `Effect.gen`/`Effect.fn`, errors are typed `Schema.TaggedError`s, and all I/O goes through services — `Commands` (git/gh/install/audit via `ChildProcessSpawner`), `FileSystem`, `Registry` (npm/GitHub HTTP via `HttpClient`), with a plain-text `Logger` layer so CLI output stays human-readable. zod is gone; every boundary is decoded with Effect `Schema` (`Schema.decodeUnknownOption`/`Effect`), and each literal vocabulary (severity, semver change, mergeable state, merge method) is one schema with a derived type in `src/schemas.ts`. Providers (`src/providers/`) stay deliberately pure string→string functions; their throws are mapped into `BranchApplyError` by the apply adapters.
 
