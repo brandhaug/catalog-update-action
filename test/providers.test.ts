@@ -39,7 +39,13 @@ describe('PROVIDERS registry', () => {
       '--no-frozen-lockfile'
     ])
     expect(PROVIDERS.pnpm.lockfileName).toBe('pnpm-lock.yaml')
-    expect(PROVIDERS.yarn.installCommand).toEqual(['yarn', 'install'])
+    // CI runners make Yarn Berry default to immutable installs, which
+    // rejects the catalog edits this action writes before installing.
+    expect(PROVIDERS.yarn.installCommand).toEqual([
+      'yarn',
+      'install',
+      '--no-immutable'
+    ])
     expect(PROVIDERS.yarn.lockfileName).toBe('yarn.lock')
     expect(PROVIDERS.bun.installArtifacts).toEqual(['bun.lock', 'bun.lockb'])
     expect(PROVIDERS.pnpm.installArtifacts).toEqual([
