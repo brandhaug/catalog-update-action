@@ -276,7 +276,11 @@ describe('buildCatalogBranchUpdate', () => {
     })
 
     expect(result.affectedFiles).toEqual(['pnpm-workspace.yaml'])
-    expect(result.installCommand).toEqual(['pnpm', 'install'])
+    expect(result.installCommand).toEqual([
+      'pnpm',
+      'install',
+      '--no-frozen-lockfile'
+    ])
 
     await Effect.runPromise(result.apply.pipe(Effect.provide(BunFileSystem.layer)))
 

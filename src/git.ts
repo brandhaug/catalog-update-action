@@ -237,6 +237,15 @@ export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 // Branch operations
 // ---------------------------------------------------------------------------
 
+/** Last few lines of a command's output, indented for the run log. */
+const outputTail = (text: string): string =>
+	text
+		.trim()
+		.split('\n')
+		.slice(-8)
+		.map((line) => `  ${line}`)
+		.join('\n')
+
 const execLogged = Effect.fn('Git.execLogged')(function* (
 	command: Array<string>,
 	cwd: string
@@ -245,8 +254,13 @@ const execLogged = Effect.fn('Git.execLogged')(function* (
 	const result = yield* commands.exec(command, { cwd })
 	if (result.exitCode !== 0) {
 		yield* Effect.logError(`  Command failed: ${command.join(' ')}`)
-		if (result.stderr) {
-			yield* Effect.logError(`  stderr: ${result.stderr}`)
+		// pnpm writes its ERR_PNPM_* diagnostics to stdout, other tools to
+		// stderr — surface the tail of both so the log explains the failure.
+		const details = [outputTail(result.stdout), outputTail(result.stderr)]
+			.filter(Boolean)
+			.join('\n')
+		if (details) {
+			yield* Effect.logError(`  Output:\n${details}`)
 		}
 	}
 	return result
@@ -410,9 +424,9 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	const commands = yield* Commands
 	const fs = yield* FileSystem.FileSystem
 
-	const checkoutResult = yield* commands.exec(
+	const checkoutResult = yield* execLogged(
 		['git', 'checkout', '-B', branch, `origin/${config.defaultBranch}`],
-		{ cwd }
+		cwd
 	)
 	if (checkoutResult.exitCode !== 0) {
 		return false
@@ -458,7 +472,7 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	}
 
 	yield* Effect.logInfo('  Running install...')
-	const installResult = yield* commands.exec(installCommand, { cwd: workDir })
+	const installResult = yield* execLogged(installCommand, workDir)
 	if (installResult.exitCode !== 0) {
 		return yield* fail(`  Failed to run install for branch "${branch}"`)
 	}
@@ -481,17 +495,17 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	})
 
 	// --no-verify: skip pre-commit hooks since this is an automated action
-	const commitResult = yield* commands.exec(
+	const commitResult = yield* execLogged(
 		['git', 'commit', '--no-verify', '-m', title],
-		{ cwd }
+		cwd
 	)
 	if (commitResult.exitCode !== 0) {
 		return yield* fail(`  Failed to commit for branch "${branch}"`)
 	}
 
-	const pushResult = yield* commands.exec(
+	const pushResult = yield* execLogged(
 		['git', 'push', `--force-with-lease=${branch}`, 'origin', branch],
-		{ cwd }
+		cwd
 	)
 	if (pushResult.exitCode !== 0) {
 		return yield* fail(`  Failed to push branch "${branch}"`)
@@ -543,7 +557,9 @@ const enableAutoMerge = Effect.fn('Git.enableAutoMerge')(function* ({
 		`  Warning: could not enable auto-merge for ${prRef}`
 	)
 
-	if (result.stderr.includes('Auto-merge is not allowed')) {
+	// GitHub spells this error both ways depending on the API surface —
+	// hyphenated and not.
+	if (/Auto[- ]merge is not allowed/.test(result.stderr)) {
 		yield* Effect.logWarning(
 			'  Enable "Allow auto-merge" in repository Settings > General > Pull Requests.'
 		)
@@ -558,6 +574,13 @@ const enableAutoMerge = Effect.fn('Git.enableAutoMerge')(function* ({
 		yield* Effect.logWarning(
 			`  The "${config.autoMerge.mergeMethod}" merge method is disabled for this repository. Allow it, or pick another autoMerge.mergeMethod.`
 		)
+	} else {
+		// No recognized cause: surface the raw error so the run log stays
+		// actionable instead of ending on a bare warning.
+		const rawError = result.stderr.trim()
+		if (rawError) {
+			yield* Effect.logWarning(`  ${rawError}`)
+		}
 	}
 
 	return false
