@@ -31,7 +31,13 @@ describe('PROVIDERS registry', () => {
     expect(Object.keys(PROVIDERS).toSorted()).toEqual(['bun', 'pnpm', 'yarn'])
     expect(PROVIDERS.bun.installCommand).toEqual(['bun', 'install'])
     expect(PROVIDERS.bun.lockfileName).toBe('bun.lock')
-    expect(PROVIDERS.pnpm.installCommand).toEqual(['pnpm', 'install'])
+    // CI runners default pnpm to --frozen-lockfile, which rejects the catalog
+    // edits this action writes before installing.
+    expect(PROVIDERS.pnpm.installCommand).toEqual([
+      'pnpm',
+      'install',
+      '--no-frozen-lockfile'
+    ])
     expect(PROVIDERS.pnpm.lockfileName).toBe('pnpm-lock.yaml')
     expect(PROVIDERS.yarn.installCommand).toEqual(['yarn', 'install'])
     expect(PROVIDERS.yarn.lockfileName).toBe('yarn.lock')
@@ -312,8 +318,8 @@ describe.each(YAML_PROVIDERS)('%s provider (YAML)', (id, fileName) => {
 // audit capabilities
 // ---------------------------------------------------------------------------
 
-// Real output captured from `pnpm audit --json` (npm 6 style, trimmed to the
-// fields the parser consumes).
+// Real output captured from `pnpm audit --json` (pnpm 11, npm 6 style,
+// trimmed to the fields the parser consumes — cwe arrives as a bare string).
 const PNPM_AUDIT_OUTPUT = JSON.stringify({
   advisories: {
     1_097_678: {
@@ -324,6 +330,23 @@ const PNPM_AUDIT_OUTPUT = JSON.stringify({
       title: 'Prototype Pollution in minimist',
       url: 'https://github.com/advisories/GHSA-xvch-5gv4-984h',
       cvss: { score: 9.8, vectorString: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' },
+      cwe: 'CWE-1321'
+    }
+  },
+  metadata: { vulnerabilities: {} }
+})
+
+// pnpm <= 10 emits cwe as the npm 6 array; both forms must normalize to
+// the array the advisory type expects.
+const PNPM_AUDIT_OUTPUT_ARRAY_CWE = JSON.stringify({
+  advisories: {
+    1_097_678: {
+      id: '1097678',
+      module_name: 'minimist',
+      severity: 'critical',
+      vulnerable_versions: '>=1.0.0 <1.2.6',
+      title: 'Prototype Pollution in minimist',
+      url: 'https://github.com/advisories/GHSA-xvch-5gv4-984h',
       cwe: ['CWE-1321']
     }
   },
@@ -385,6 +408,15 @@ describe('audit capabilities', () => {
         }
       ]
     })
+  })
+
+  test('pnpm accepts array-form cwe and string advisory ids', () => {
+    const result = PROVIDERS.pnpm.audit.parseOutput({
+      output: PNPM_AUDIT_OUTPUT_ARRAY_CWE
+    })
+
+    expect(result?.minimist?.[0]?.cwe).toEqual(['CWE-1321'])
+    expect(result?.minimist?.[0]?.id).toBe(1_097_678)
   })
 
   test('pnpm returns null for unexpected formats', () => {
