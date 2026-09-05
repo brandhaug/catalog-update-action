@@ -1,4 +1,4 @@
-import { Option, Schema, SchemaGetter } from 'effect'
+import { Option, Schema } from 'effect'
 import { parseJsonDocument, severitySchema } from '../schemas'
 import { isToolOverrideKey, overrideKey } from '../utils'
 import { type AuditResult } from '../types'
@@ -16,18 +16,8 @@ import {
 
 // pnpm `audit --json` emits the npm 6 style: one map of advisories keyed by
 // advisory id, each carrying the fields we need for override computation.
-// pnpm <= 10 emits cwe as the npm 6 array; pnpm 11 collapses it to a string —
-// the boundary schema normalizes both to the array the advisory type expects.
-const cweSchema = Schema.Union([
-	Schema.String.pipe(
-		Schema.decodeTo(Schema.Array(Schema.String), {
-			decode: SchemaGetter.transform((cwe: string) => [cwe]),
-			encode: SchemaGetter.transform((cwes: Array<string>) => cwes[0] ?? '')
-		})
-	),
-	Schema.Array(Schema.String)
-])
-
+// pnpm <= 10 emits cwe as the npm 6 array; pnpm 11 collapses it to a bare
+// string — ArrayEnsure accepts either and normalizes to the array.
 const pnpmAdvisorySchema = Schema.Struct({
 	id: Schema.Union([Schema.Number, Schema.String]),
 	module_name: Schema.String,
@@ -38,7 +28,7 @@ const pnpmAdvisorySchema = Schema.Struct({
 	cvss: Schema.optionalKey(
 		Schema.Struct({ score: Schema.Number, vectorString: Schema.String })
 	),
-	cwe: Schema.optionalKey(cweSchema)
+	cwe: Schema.optionalKey(Schema.ArrayEnsure(Schema.String))
 })
 
 const pnpmAuditOutputSchema = Schema.Struct({

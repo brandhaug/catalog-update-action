@@ -64,7 +64,7 @@ export const githubReleasesSchema = Schema.Array(
 		tag_name: Schema.String,
 		// GitHub emits `"body": null` for body-less releases — an explicit
 		// null, not an omitted key — so optionalKey alone is not enough.
-		body: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+		body: Schema.optionalKey(Schema.NullOr(Schema.String)),
 		html_url: Schema.optionalKey(Schema.String)
 	})
 )
