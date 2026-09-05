@@ -387,6 +387,15 @@ const returnToDefault = Effect.fn('Git.returnToDefault')(function* ({
 // Generic branch update + PR creation
 // ---------------------------------------------------------------------------
 
+/** Last few lines of a command's output, indented for the run log. */
+const outputTail = (text: string): string =>
+	text
+		.trim()
+		.split('\n')
+		.slice(-8)
+		.map((line) => `  ${line}`)
+		.join('\n')
+
 const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	branchUpdate,
 	config,
@@ -460,6 +469,17 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	yield* Effect.logInfo('  Running install...')
 	const installResult = yield* commands.exec(installCommand, { cwd: workDir })
 	if (installResult.exitCode !== 0) {
+		// pnpm writes its ERR_PNPM_* diagnostics to stdout, others to stderr;
+		// surface the tail of both so the log explains the failure.
+		const details = [
+			outputTail(installResult.stdout),
+			outputTail(installResult.stderr)
+		]
+			.filter(Boolean)
+			.join('\n')
+		if (details) {
+			yield* Effect.logError(`  Install output:\n${details}`)
+		}
 		return yield* fail(`  Failed to run install for branch "${branch}"`)
 	}
 
@@ -543,7 +563,13 @@ const enableAutoMerge = Effect.fn('Git.enableAutoMerge')(function* ({
 		`  Warning: could not enable auto-merge for ${prRef}`
 	)
 
-	if (result.stderr.includes('Auto-merge is not allowed')) {
+	// GitHub spells this error both ways depending on the API surface, so
+	// match the hyphenated and unhyphenated forms.
+	const autoMergeDisallowed =
+		result.stderr.includes('Auto-merge is not allowed') ||
+		result.stderr.includes('Auto merge is not allowed')
+
+	if (autoMergeDisallowed) {
 		yield* Effect.logWarning(
 			'  Enable "Allow auto-merge" in repository Settings > General > Pull Requests.'
 		)
@@ -558,6 +584,10 @@ const enableAutoMerge = Effect.fn('Git.enableAutoMerge')(function* ({
 		yield* Effect.logWarning(
 			`  The "${config.autoMerge.mergeMethod}" merge method is disabled for this repository. Allow it, or pick another autoMerge.mergeMethod.`
 		)
+	} else {
+		// No recognized cause: surface the raw error so the run log stays
+		// actionable instead of ending on a bare warning.
+		yield* Effect.logWarning(`  ${result.stderr.trim()}`)
 	}
 
 	return false
