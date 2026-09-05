@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.2...catalog-update-action-v1.0.3) (2026-09-05)
+
+
+### Bug Fixes
+
+* **release-notes:** avoid tagging upstream contributors in PR bodies ([#40](https://github.com/brandhaug/catalog-update-action/issues/40)) ([716bff2](https://github.com/brandhaug/catalog-update-action/commit/716bff263151487cd43484559731598fc8f1a8c7))
+
 ## [1.0.2](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.1...catalog-update-action-v1.0.2) (2026-09-05)
 
 
