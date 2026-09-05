@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.2](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.1...catalog-update-action-v1.0.2) (2026-09-05)
+
+
+### Bug Fixes
+
+* repair the pnpm pipeline and failure diagnostics ([#37](https://github.com/brandhaug/catalog-update-action/issues/37)) ([628430f](https://github.com/brandhaug/catalog-update-action/commit/628430f8124a2d02bc2088f4fd64ba4104cd1e94))
+* **yarn:** install with --no-immutable and require Berry 4.10+ ([#39](https://github.com/brandhaug/catalog-update-action/issues/39)) ([7e851e3](https://github.com/brandhaug/catalog-update-action/commit/7e851e3d47f423012b3a471d299348578c063859))
+
+
+### Miscellaneous
+
+* **deps:** bump oxfmt from 0.65.0 to 0.66.0 ([#34](https://github.com/brandhaug/catalog-update-action/issues/34)) ([43b4ce2](https://github.com/brandhaug/catalog-update-action/commit/43b4ce237f95c94c0b9dac1615fb1386d0283053))
+* **deps:** bump oxlint from 1.80.0 to 1.81.0 ([#35](https://github.com/brandhaug/catalog-update-action/issues/35)) ([6b970e3](https://github.com/brandhaug/catalog-update-action/commit/6b970e3ca08dcd1245fc9037413fd61650c1a60b))
+* upgrade bun to 1.4.2 ([#38](https://github.com/brandhaug/catalog-update-action/issues/38)) ([3dcb9f8](https://github.com/brandhaug/catalog-update-action/commit/3dcb9f88225100b2cbb9815ac3918ddf26222df5))
+
 ## [1.0.1](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.0...catalog-update-action-v1.0.1) (2026-09-02)
 
 
