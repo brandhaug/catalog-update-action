@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { clampNoteBody, formatReleaseNotes } from '../src/release-notes'
+import { clampNoteBody, escapeMentions, formatReleaseNotes } from '../src/release-notes'
 import { type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
@@ -27,6 +27,22 @@ describe('clampNoteBody', () => {
   })
 })
 
+describe('escapeMentions', () => {
+  test('defuses user and team mentions', () => {
+    expect(escapeMentions('thanks @octocat and @acme/core!')).toBe(
+      'thanks @<!---->octocat and @<!---->acme/core!'
+    )
+  })
+
+  test('defuses a mention at the start of the body', () => {
+    expect(escapeMentions('@octocat opened this')).toBe('@<!---->octocat opened this')
+  })
+
+  test('leaves emails alone', () => {
+    expect(escapeMentions('mail a@b.com about it')).toBe('mail a@b.com about it')
+  })
+})
+
 describe('formatReleaseNotes', () => {
   test('returns no lines when no notes exist', () => {
     const lines = formatReleaseNotes({
@@ -46,6 +62,17 @@ describe('formatReleaseNotes', () => {
     })
     expect(lines).toContain('## Release Notes')
     expect(lines).toContain('React 19 is here!')
+  })
+
+  test('defuses mentions in rendered note bodies', () => {
+    const notes = new Map<string, Array<VersionReleaseNote>>([
+      ['react', [{ version: '19.0.0', body: 'thanks @octocat' }]]
+    ])
+    const lines = formatReleaseNotes({
+      updates: [makeCandidate({ name: 'react' })],
+      releaseNotes: notes
+    })
+    expect(lines).toContain('thanks @<!---->octocat')
   })
 
   test('stops adding notes once the combined limit is reached', () => {

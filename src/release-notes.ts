@@ -12,6 +12,23 @@ const RELEASE_NOTES_MAX_LENGTH = 2000
 /** Longest combined release-notes section in a PR body. */
 const COMBINED_RELEASE_NOTES_MAX_LENGTH = 5000
 
+/**
+ * Matches a GitHub user or team mention: an `@` that is not preceded by a word
+ * character (so emails like `a@b.com` are left alone), followed by a login and
+ * an optional `/team` segment.
+ */
+const MENTION_PATTERN =
+	/(^|[^\w@/])@([a-zA-Z0-9][a-zA-Z0-9-]{0,38}(?:\/[a-zA-Z0-9._-]{1,80})?)/g
+
+/**
+ * Defuse `@mentions` so upstream release notes do not notify every contributor
+ * of the dependency when the PR body is posted. The empty HTML comment renders
+ * away, so the text still reads as `@name` but GitHub does not link or notify.
+ */
+export function escapeMentions(body: string): string {
+	return body.replace(MENTION_PATTERN, '$1@<!---->$2')
+}
+
 /** Clamp one note body, linking to the full notes when it is cut. */
 export function clampNoteBody({
 	body,
@@ -55,7 +72,7 @@ export function formatReleaseNotes({
 				'<details>',
 				`<summary><b>${u.name}</b> (${u.currentVersion} → ${u.latestVersion})</summary>`,
 				'',
-				firstNote.body,
+				escapeMentions(firstNote.body),
 				'',
 				'</details>',
 				''
@@ -86,7 +103,7 @@ export function formatReleaseNotes({
 					'<details>',
 					`<summary><b>${note.version}</b></summary>`,
 					'',
-					note.body,
+					escapeMentions(note.body),
 					'',
 					'</details>',
 					''
