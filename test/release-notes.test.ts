@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { clampNoteBody, formatReleaseNotes } from '../src/release-notes'
+import { clampNoteBody, escapeMentions, formatReleaseNotes } from '../src/release-notes'
 import { type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
@@ -27,6 +27,50 @@ describe('clampNoteBody', () => {
   })
 })
 
+describe('escapeMentions', () => {
+  test('defuses user and team mentions', () => {
+    expect(escapeMentions('thanks @octocat and @acme/core!')).toBe(
+      'thanks @<!---->octocat and @<!---->acme/core!'
+    )
+  })
+
+  test('defuses a mention at the start of the body', () => {
+    expect(escapeMentions('@octocat opened this')).toBe('@<!---->octocat opened this')
+  })
+
+  test('leaves emails alone', () => {
+    expect(escapeMentions('mail a@b.com about it')).toBe('mail a@b.com about it')
+  })
+
+  test('leaves inline code spans untouched', () => {
+    expect(escapeMentions('install with `npm i @types/node` today')).toBe(
+      'install with `npm i @types/node` today'
+    )
+  })
+
+  test('defuses a mention that follows a code span', () => {
+    expect(escapeMentions('`npm i x` @octocat')).toBe('`npm i x` @<!---->octocat')
+  })
+
+  test('leaves fenced code blocks untouched, defuses prose after them', () => {
+    const body = '```ts\nconst x = "@octocat"\n```\nthanks @maintainer'
+    expect(escapeMentions(body)).toBe('```ts\nconst x = "@octocat"\n```\nthanks @<!---->maintainer')
+  })
+
+  test('leaves tilde fences untouched', () => {
+    const body = '~~~\npnpm add @scope/pkg\n~~~'
+    expect(escapeMentions(body)).toBe(body)
+  })
+
+  test('keeps a code span open across lines intact', () => {
+    expect(escapeMentions('`code\nspan` @octocat')).toBe('`code\nspan` @<!---->octocat')
+  })
+
+  test('treats an unclosed backtick run as prose', () => {
+    expect(escapeMentions('`unclosed @octocat')).toBe('`unclosed @<!---->octocat')
+  })
+})
+
 describe('formatReleaseNotes', () => {
   test('returns no lines when no notes exist', () => {
     const lines = formatReleaseNotes({
@@ -46,6 +90,41 @@ describe('formatReleaseNotes', () => {
     })
     expect(lines).toContain('## Release Notes')
     expect(lines).toContain('React 19 is here!')
+  })
+
+  test('defuses mentions in rendered note bodies', () => {
+    const notes = new Map<string, Array<VersionReleaseNote>>([
+      ['react', [{ version: '19.0.0', body: 'thanks @octocat' }]]
+    ])
+    const lines = formatReleaseNotes({
+      updates: [makeCandidate({ name: 'react' })],
+      releaseNotes: notes
+    })
+    expect(lines).toContain('thanks @<!---->octocat')
+  })
+
+  test('defuses scoped package names in section summaries', () => {
+    const notes = new Map<string, Array<VersionReleaseNote>>([
+      ['@scope/pkg', [{ version: '2.0.0', body: 'shipped' }]]
+    ])
+    const lines = formatReleaseNotes({
+      updates: [makeCandidate({ name: '@scope/pkg' })],
+      releaseNotes: notes
+    })
+    expect(lines).toContain(
+      '<summary><b>@<!---->scope/pkg</b> (1.0.0 → 2.0.0)</summary>'
+    )
+  })
+
+  test('leaves code in note bodies intact when defusing mentions', () => {
+    const notes = new Map<string, Array<VersionReleaseNote>>([
+      ['react', [{ version: '19.0.0', body: 'run `npm i @types/node`, thanks @octocat' }]]
+    ])
+    const lines = formatReleaseNotes({
+      updates: [makeCandidate({ name: 'react' })],
+      releaseNotes: notes
+    })
+    expect(lines).toContain('run `npm i @types/node`, thanks @<!---->octocat')
   })
 
   test('stops adding notes once the combined limit is reached', () => {
