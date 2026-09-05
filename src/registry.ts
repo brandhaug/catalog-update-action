@@ -57,10 +57,14 @@ const npmMetadataResponseSchema = Schema.Struct({
 })
 
 /** Shape of the GitHub releases list response. */
-const githubReleasesSchema = Schema.Array(
+// Exported for tests: body-less releases are the norm for large monorepos
+// (e.g. DefinitelyTyped), and one malformed entry must not fail the list.
+export const githubReleasesSchema = Schema.Array(
 	Schema.Struct({
 		tag_name: Schema.String,
-		body: Schema.optionalKey(Schema.String),
+		// GitHub emits `"body": null` for body-less releases — an explicit
+		// null, not an omitted key — so optionalKey alone is not enough.
+		body: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
 		html_url: Schema.optionalKey(Schema.String)
 	})
 )
