@@ -110,7 +110,11 @@ const yarnAudit: AuditCapability = {
 
 export const yarnProvider: CatalogProvider = {
 	id: 'yarn',
-	installCommand: ['yarn', 'install'],
+	// Yarn Berry enables immutable installs when CI=true, so a plain install
+	// after this action's catalog edits fails with YN0028 ("The lockfile
+	// would have been modified by this install, which is explicitly
+	// forbidden") — the Yarn twin of pnpm's frozen-lockfile failure.
+	installCommand: ['yarn', 'install', '--no-immutable'],
 	lockfileName: 'yarn.lock',
 	// yarn install may update .yarnrc.yml settings alongside the lockfile.
 	installArtifacts: ['yarn.lock', '.yarnrc.yml'],

@@ -22,14 +22,14 @@ Dependabot doesn't understand the `catalog:` protocol, so it can't update the ce
 | --- | --- | --- | --- | --- | --- |
 | Bun | `package.json` → `catalog` / `catalogs` | ✓ | ✓ | `bun install` | ✓ (`bun audit`) |
 | pnpm | `pnpm-workspace.yaml` → `catalog` / `catalogs` | ✓ | ✓ | `pnpm install` | ✓ (`pnpm audit`) |
-| Yarn (Berry 4+) | `.yarnrc.yml` → `catalog` / `catalogs` | ✓ | ✓ | `yarn install` | ✓ (`yarn npm audit`) |
+| Yarn (Berry 4.10+) | `.yarnrc.yml` → `catalog` / `catalogs` | ✓ | ✓ | `yarn install` | ✓ (`yarn npm audit`) |
 
 The package manager is detected from the definition file that declares the catalog — there is no `packageManager` config option (it was removed; existing configs that set it are ignored with a warning).
 
 ## Prerequisites
 
 - [Bun](https://bun.sh) runtime (used to run this action; Bun catalogs also use it to install)
-- The package manager matching your catalogs (`pnpm` / `yarn`) available on the runner for non-Bun catalogs
+- The package manager matching your catalogs (`pnpm` / `yarn`) available on the runner for non-Bun catalogs. For Yarn that means **Berry 4.10+** on `PATH` — catalogs are built in from 4.10.0, and the Yarn 1.x binary that GitHub runners ship by default understands neither catalogs nor `.yarnrc.yml`. Add a setup step, e.g. `corepack enable` with a `packageManager: yarn@4.x` field in `package.json`
 - `gh` CLI (pre-installed on GitHub Actions runners)
 - A GitHub token with `contents: write` and `pull-requests: write` permissions
 
