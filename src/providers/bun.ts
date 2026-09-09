@@ -15,7 +15,7 @@ import {
 	type AuditCapability,
 	type ParsedCatalog
 } from './types'
-import { readJsonStringMap, writeJsonStringMap } from './json'
+import { applyJsonEdit, readJsonStringMap, writeJsonStringMap } from './json'
 
 /**
  * Bun defines catalogs as `catalog` (default) and `catalogs.<name>` at the
@@ -74,31 +74,6 @@ function catalogSections(pkg: JsonObject): Array<{
 	}
 
 	return sections
-}
-
-/** Rebuild the tree along `path`, applying catalog updates at the leaf. */
-function withCatalogUpdates(
-	node: JsonObject,
-	path: Array<string>,
-	updates: Array<UpdateCandidate>
-) {
-	const result = { ...node }
-
-	if (path.length === 0) {
-		for (const update of updates) {
-			result[update.name] = buildCatalogValue({ update })
-		}
-		return result
-	}
-
-	const head = path.at(0)
-	if (head !== undefined) {
-		const child = readJsonObject(result[head])
-		if (child) {
-			result[head] = withCatalogUpdates(child, path.slice(1), updates)
-		}
-	}
-	return result
 }
 
 /** Parse a package.json document, returning undefined when it is not JSON. */
@@ -165,12 +140,15 @@ export function applyBunCatalogUpdates({
 		throw new Error(`No catalog "${catalogName}" found in package.json`)
 	}
 
-	const updated = withCatalogUpdates(pkg, section.path, updates)
-	// Definition files are rewritten in the exact 2-space + trailing-newline
-	// format the package managers themselves emit, which a Schema encoder
-	// would not reproduce byte-for-byte.
-	// oxlint-disable-next-line effect/noGlobals
-	return `${JSON.stringify(updated, null, 2)}\n`
+	let updated = content
+	for (const update of updates) {
+		updated = applyJsonEdit(
+			updated,
+			[...section.path, update.name],
+			buildCatalogValue({ update })
+		)
+	}
+	return updated
 }
 
 // ---------------------------------------------------------------------------

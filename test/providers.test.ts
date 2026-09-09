@@ -137,11 +137,11 @@ describe('bun provider', () => {
   })
 
   test('applyUpdates rewrites package.json with updated values', () => {
-    const content = JSON.stringify({
+    const content = `${JSON.stringify({
       name: 'root',
       catalog: { react: '^18.0.0', zod: '3.0.0' },
       catalogs: { testing: { jest: '29.0.0' } }
-    })
+    })}\n`
 
     const updated = bun.applyUpdates({
       content,
@@ -153,6 +153,33 @@ describe('bun provider', () => {
     expect(pkg.catalog).toEqual({ react: '^19.1.0', zod: '3.0.0' })
     expect(pkg.name).toBe('root')
     expect(updated.endsWith('\n')).toBe(true)
+  })
+
+  test('applyUpdates changes only the catalog value and preserves formatting', () => {
+    const content = [
+      '{',
+      '\t"name":"root",',
+      '\t"description": "keep  this layout",',
+      '\t"catalog": {',
+      '\t\t"react": "^18.0.0",',
+      '\t\t"zod": "3.0.0"',
+      '\t}',
+      '}'
+    ].join('\n')
+
+    const updated = bun.applyUpdates({
+      content,
+      catalogName: 'default',
+      updates: [
+        makeCandidate({
+          name: 'react',
+          latestVersion: '19.1.0',
+          rangePrefix: '^'
+        })
+      ]
+    })
+
+    expect(updated).toBe(content.replace('^18.0.0', '^19.1.0'))
   })
 
   test('applyUpdates targets named catalogs', () => {
@@ -472,6 +499,26 @@ describe('audit capabilities', () => {
 
     const cleared = audit.writeOverrides({ content, map: {} })
     expect(JSON.parse(cleared).overrides).toBeUndefined()
+  })
+
+  test('JSON overrides preserve the existing package.json formatting', () => {
+    const audit = PROVIDERS.bun.audit
+    const content = [
+      '{',
+      '\t"name": "root",',
+      '\t"overrides": {',
+      '\t\t"minimist@<1.2.6": "1.2.5",',
+      '\t\t"keep": "^1.0.0"',
+      '\t}',
+      '}'
+    ].join('\n')
+
+    const updated = audit.writeOverrides({
+      content,
+      map: { 'minimist@<1.2.6': '1.2.6', keep: '^1.0.0' }
+    })
+
+    expect(updated).toBe(content.replace('1.2.5', '1.2.6'))
   })
 
   test('pnpm reads and writes pnpm-workspace.yaml overrides, preserving comments', () => {
