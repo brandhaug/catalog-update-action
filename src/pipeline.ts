@@ -18,7 +18,11 @@ import { getProvider, type ParsedCatalog } from './providers'
 import { shouldIgnore, assignToGroups } from './groups'
 import { Registry } from './registry'
 import { filterByReleaseAge } from './release-age'
-import { classifySemverChange, getOverrideBranchPrefix } from './utils'
+import {
+	classifySemverChange,
+	getOverrideBranchPrefix,
+	resolveRepoPath
+} from './utils'
 import {
 	type BranchUpdate,
 	type CatalogEntry,
@@ -70,7 +74,7 @@ function makeCatalogBranchBuilder(catalog: CatalogRun) {
 			updates,
 			config: catalog.config,
 			location: catalog.location,
-			workDir: catalog.dir.workDir,
+			cwd: catalog.dir.cwd,
 			titleSuffix: catalog.titleSuffix,
 			branchPrefix: catalog.effectiveBranchPrefix,
 			releaseNotes: catalog.releaseNotes
@@ -557,7 +561,9 @@ export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 	yield* Effect.logInfo('  Parsing catalog...')
 	const fs = yield* FileSystem.FileSystem
 	const definitionContent = yield* fs
-		.readFileString(`${dir.workDir}/${location.definitionRelPath}`)
+		.readFileString(
+			resolveRepoPath({ cwd: dir.cwd, relPath: location.definitionRelPath })
+		)
 		.pipe(Effect.option)
 	const definition: ParsedCatalog | undefined = Option.isSome(definitionContent)
 		? provider

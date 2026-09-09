@@ -1,17 +1,18 @@
 import { describe, expect, test, afterAll } from 'bun:test'
 import { Effect } from 'effect'
 import { BunFileSystem } from '@effect/platform-bun'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits } from '../src/git'
 import { type CatalogLocation, type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
 const bunTestDir = mkdtempSync(join(tmpdir(), 'git-test-bun-'))
+const nestedTestDir = mkdtempSync(join(tmpdir(), 'git-test-nested-'))
 const missingTestDir = mkdtempSync(join(tmpdir(), 'git-test-missing-'))
 const pnpmTestDir = mkdtempSync(join(tmpdir(), 'git-test-pnpm-'))
 
-const TEST_DIRS = [bunTestDir, missingTestDir, pnpmTestDir]
+const TEST_DIRS = [bunTestDir, nestedTestDir, missingTestDir, pnpmTestDir]
 
 afterAll(() => {
   for (const dir of TEST_DIRS) {
@@ -111,7 +112,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: bunRootLocation,
-      workDir: '/tmp/work',
+      cwd: '/tmp/work',
       releaseNotes: new Map()
     })
 
@@ -130,7 +131,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: bunRootLocation,
-      workDir: '/tmp/work',
+      cwd: '/tmp/work',
       releaseNotes: new Map()
     })
 
@@ -145,7 +146,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: bunRootLocation,
-      workDir: '/tmp/work',
+      cwd: '/tmp/work',
       releaseNotes: new Map()
     })
 
@@ -167,7 +168,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: bunRootLocation,
-      workDir,
+      cwd: workDir,
       releaseNotes: new Map()
     })
 
@@ -176,6 +177,34 @@ describe('buildCatalogBranchUpdate', () => {
     const pkg = await Bun.file(`${workDir}/package.json`).json()
     expect(pkg.catalog).toEqual({ react: '19.0.0', zod: '3.0.0' })
     expect(pkg.name).toBe('root')
+  })
+
+  test('apply writes a nested catalog using its repo-relative definition path', async () => {
+    const cwd = nestedTestDir
+    const projectDir = join(cwd, 'milkyway')
+    mkdirSync(projectDir, { recursive: true })
+    await Bun.write(
+      `${projectDir}/package.json`,
+      JSON.stringify({ name: 'milkyway', catalog: { react: '18.0.0' } }, null, 2)
+    )
+
+    const result = buildCatalogBranchUpdate({
+      groupName: 'react',
+      updates: [makeCandidate({ name: 'react', latestVersion: '19.0.0' })],
+      config: baseConfig,
+      location: {
+        ...bunRootLocation,
+        dir: 'milkyway',
+        definitionRelPath: 'milkyway/package.json'
+      },
+      cwd,
+      releaseNotes: new Map()
+    })
+
+    await Effect.runPromise(result.apply.pipe(Effect.provide(BunFileSystem.layer)))
+
+    const pkg = await Bun.file(`${projectDir}/package.json`).json()
+    expect(pkg.catalog).toEqual({ react: '19.0.0' })
   })
 
   test('apply fails with a BranchApplyError when the catalog is missing', async () => {
@@ -188,7 +217,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: bunRootLocation,
-      workDir,
+      cwd: workDir,
       releaseNotes: new Map()
     })
 
@@ -206,7 +235,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: { ...bunRootLocation, dir: 'apps/frontend' },
-      workDir: '/tmp/work/apps/frontend',
+      cwd: '/tmp/work',
       titleSuffix: ' (in /apps/frontend)',
       branchPrefix: 'catalog-update/apps/frontend',
       releaseNotes: new Map()
@@ -226,7 +255,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: { ...bunRootLocation, dir: 'mito' },
-      workDir: '/tmp/work/mito',
+      cwd: '/tmp/work',
       titleSuffix: ' (in /mito)',
       branchPrefix: 'catalog-update/mito',
       releaseNotes: new Map()
@@ -243,7 +272,7 @@ describe('buildCatalogBranchUpdate', () => {
       updates,
       config: baseConfig,
       location: bunRootLocation,
-      workDir: '/tmp/work',
+      cwd: '/tmp/work',
       releaseNotes: new Map()
     })
 
@@ -271,7 +300,7 @@ describe('buildCatalogBranchUpdate', () => {
         definitionRelPath: 'pnpm-workspace.yaml',
         definition: { catalogName: 'default', entries: { react: '^18.0.0' } }
       },
-      workDir,
+      cwd: workDir,
       releaseNotes: new Map()
     })
 

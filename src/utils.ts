@@ -35,6 +35,17 @@ export function matchesAnyPattern({
 	return patterns.some((pattern) => matchesGlob({ name, pattern }))
 }
 
+/** Resolve a repository-relative path from the repository root. */
+export function resolveRepoPath({
+	cwd,
+	relPath
+}: {
+	cwd: string
+	relPath: string
+}): string {
+	return `${cwd}/${relPath}`
+}
+
 // ---------------------------------------------------------------------------
 // Semver utilities
 // ---------------------------------------------------------------------------

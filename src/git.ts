@@ -2,7 +2,7 @@ import { Effect, FileSystem, Option, Schema } from 'effect'
 import { Commands } from './commands'
 import { formatReleaseNotes } from './release-notes'
 import { mergeableSchema, parseJsonDocument } from './schemas'
-import { getOverrideBranchPrefix, PR_FOOTER } from './utils'
+import { getOverrideBranchPrefix, PR_FOOTER, resolveRepoPath } from './utils'
 import { expectedInstallBasenames, getProvider } from './providers'
 import {
 	BranchApplyError,
@@ -70,7 +70,7 @@ export function buildCatalogBranchUpdate({
 	updates,
 	config,
 	location,
-	workDir,
+	cwd,
 	titleSuffix = '',
 	branchPrefix,
 	releaseNotes
@@ -79,7 +79,7 @@ export function buildCatalogBranchUpdate({
 	updates: Array<UpdateCandidate>
 	config: Config
 	location: CatalogLocation
-	workDir: string
+	cwd: string
 	titleSuffix?: string
 	branchPrefix?: string
 	releaseNotes: Map<string, Array<VersionReleaseNote>>
@@ -87,7 +87,10 @@ export function buildCatalogBranchUpdate({
 	const prefix = branchPrefix ?? config.branchPrefix
 	const branch = `${prefix}/${groupName}`
 	const provider = getProvider(location.providerId)
-	const definitionPath = `${workDir}/${location.definitionRelPath}`
+	const definitionPath = resolveRepoPath({
+		cwd,
+		relPath: location.definitionRelPath
+	})
 	const affectedFiles = [location.definitionRelPath]
 	const first = updates[0]
 	const title =
