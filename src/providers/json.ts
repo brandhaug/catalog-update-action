@@ -1,5 +1,11 @@
 import { Option } from 'effect'
 import {
+	applyEdits,
+	modify,
+	type FormattingOptions,
+	type JSONPath
+} from 'jsonc-parser'
+import {
 	readStringRecord,
 	readJsonObject,
 	parseJsonDocument,
@@ -45,20 +51,63 @@ export function writeJsonStringMap({
 	// BranchUpdate apply effect, which maps the failure into the rollback path.
 	// oxlint-disable-next-line effect/noGlobals
 	const doc: JsonObject = JSON.parse(content)
-	if (Object.keys(map).length > 0) {
-		// Definition files are rewritten in the exact 2-space + trailing-newline
-		// format the package managers themselves emit, which a Schema encoder
-		// would not reproduce byte-for-byte.
-		// oxlint-disable-next-line effect/noGlobals
-		return `${JSON.stringify({ ...doc, [field]: map }, null, 2)}\n`
+	const existing = readStringRecord(doc[field])
+	let updated = content
+
+	if (Object.keys(map).length === 0) {
+		return Object.hasOwn(doc, field)
+			? applyJsonEdit(updated, [field], undefined)
+			: updated
 	}
-	// An empty map removes the field entirely.
-	const rest: JsonObject = {}
-	for (const [key, value] of Object.entries(doc)) {
-		if (key !== field) {
-			rest[key] = value
+
+	if (existing === undefined) {
+		return applyJsonEdit(updated, [field], map)
+	}
+
+	// Change only values that differ, then remove stale entries. Applying each
+	// edit to the current source keeps offsets correct and preserves formatting.
+	for (const [key, value] of Object.entries(map)) {
+		if (existing[key] !== value) {
+			updated = applyJsonEdit(updated, [field, key], value)
 		}
 	}
-	// oxlint-disable-next-line effect/noGlobals
-	return `${JSON.stringify(rest, null, 2)}\n`
+	for (const key of Object.keys(existing)) {
+		if (!(key in map)) {
+			updated = applyJsonEdit(updated, [field, key], undefined)
+		}
+	}
+
+	return updated
+}
+
+/** Apply a JSON edit while using the surrounding document's indentation. */
+export function applyJsonEdit(
+	content: string,
+	path: JSONPath,
+	value: string | Record<string, string> | undefined
+): string {
+	return applyEdits(
+		content,
+		modify(content, path, value, {
+			formattingOptions: detectFormatting(content)
+		})
+	)
+}
+
+function detectFormatting(content: string): FormattingOptions {
+	const eol = content.includes('\r\n') ? '\r\n' : '\n'
+	const indent = content
+		.split(/\r?\n/)
+		.map((line) => line.match(/^(\s+)\S/))
+		.find((match) => match !== null)?.[1]
+
+	if (indent?.includes('\t')) {
+		return { insertSpaces: false, tabSize: 1, eol }
+	}
+
+	return {
+		insertSpaces: true,
+		tabSize: indent?.length || 2,
+		eol
+	}
 }
