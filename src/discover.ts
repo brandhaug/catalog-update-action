@@ -1,5 +1,5 @@
 import { Effect, FileSystem, Option } from 'effect'
-import { matchesAnyPattern } from './utils'
+import { matchesAnyPattern, resolveRepoPath } from './utils'
 import { getProvider, type ProviderId } from './providers'
 import { type CatalogLocation } from './types'
 
@@ -74,7 +74,7 @@ export const discoverCatalogLocations = Effect.fn('Discover.catalogLocations')(
 				}
 
 				const content = yield* fs
-					.readFileString(`${cwd}/${path}`)
+					.readFileString(resolveRepoPath({ cwd, relPath: path }))
 					.pipe(Effect.option)
 				if (Option.isNone(content)) {
 					yield* Effect.logWarning(
