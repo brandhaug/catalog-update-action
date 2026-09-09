@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { getProvider, PROVIDERS, type ProviderId } from '../src/providers'
+import { writeJsonStringMap } from '../src/providers/json'
 import { type OverrideEntry, type UpdateCandidate } from '../src/types'
 
 function makeCandidate(overrides: Partial<UpdateCandidate> & { name: string }): UpdateCandidate {
@@ -519,6 +520,18 @@ describe('audit capabilities', () => {
     })
 
     expect(updated).toBe(content.replace('1.2.5', '1.2.6'))
+  })
+
+  test('JSON overrides remove an existing field even when its value is invalid', () => {
+    const content = '{\n  "name": "root",\n  "overrides": null\n}\n'
+
+    const updated = writeJsonStringMap({
+      content,
+      field: 'overrides',
+      map: {}
+    })
+
+    expect(updated).toBe('{\n  "name": "root"\n}\n')
   })
 
   test('pnpm reads and writes pnpm-workspace.yaml overrides, preserving comments', () => {

@@ -55,9 +55,9 @@ export function writeJsonStringMap({
 	let updated = content
 
 	if (Object.keys(map).length === 0) {
-		return existing === undefined
-			? updated
-			: applyJsonEdit(updated, [field], undefined)
+		return Object.hasOwn(doc, field)
+			? applyJsonEdit(updated, [field], undefined)
+			: updated
 	}
 
 	if (existing === undefined) {
