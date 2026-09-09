@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.4](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.3...catalog-update-action-v1.0.4) (2026-09-09)
+
+
+### Bug Fixes
+
+* **json:** preserve package manifest formatting ([#44](https://github.com/brandhaug/catalog-update-action/issues/44)) ([fd311e0](https://github.com/brandhaug/catalog-update-action/commit/fd311e01389ab49265c4ddafb0d585eaab59e6f7))
+* **monorepo:** resolve nested catalog paths from repository root ([#45](https://github.com/brandhaug/catalog-update-action/issues/45)) ([5073a21](https://github.com/brandhaug/catalog-update-action/commit/5073a217cbb61bed894779ddc18b163f6e25b364))
+
+
+### Miscellaneous
+
+* **deps:** bump @types/bun from 1.4.0 to 1.4.1 ([#42](https://github.com/brandhaug/catalog-update-action/issues/42)) ([04158c9](https://github.com/brandhaug/catalog-update-action/commit/04158c94371e5bea43cd50f5b50a5a98f0f21e67))
+
 ## [1.0.3](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.2...catalog-update-action-v1.0.3) (2026-09-05)
 
 
