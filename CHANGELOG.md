@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.6](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.5...catalog-update-action-v1.0.6) (2026-09-11)
+
+
+### Miscellaneous
+
+* **deps:** bump @types/bun from 1.4.1 to 1.4.2 ([#48](https://github.com/brandhaug/catalog-update-action/issues/48)) ([8127b6a](https://github.com/brandhaug/catalog-update-action/commit/8127b6a49f9da2e9d0c7a4ca2a2a8936449c0a22))
+* **deps:** bump oxfmt from 0.66.0 to 0.67.0 ([#49](https://github.com/brandhaug/catalog-update-action/issues/49)) ([bb36656](https://github.com/brandhaug/catalog-update-action/commit/bb36656d72d14aadd89f8bd6cb10d30acda25372))
+* **deps:** bump oxlint from 1.81.0 to 1.82.0 ([#50](https://github.com/brandhaug/catalog-update-action/issues/50)) ([70a04fd](https://github.com/brandhaug/catalog-update-action/commit/70a04fd6acc608a1e0c13515dead252adb13bc99))
+
 ## [1.0.5](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.4...catalog-update-action-v1.0.5) (2026-09-11)
 
 
