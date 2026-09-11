@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.5](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.4...catalog-update-action-v1.0.5) (2026-09-11)
+
+
+### Bug Fixes
+
+* **release-age:** cap fallback at the original target version ([#46](https://github.com/brandhaug/catalog-update-action/issues/46)) ([59382c3](https://github.com/brandhaug/catalog-update-action/commit/59382c3b75db783e997515cbc025d34496cd2c8b))
+
 ## [1.0.4](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.3...catalog-update-action-v1.0.4) (2026-09-09)
 
 
