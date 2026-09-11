@@ -43,9 +43,10 @@ export type ReleaseAgeFilter = {
 	events: Array<ReleaseAgeEvent>
 }
 
-/** Find the newest published version that is older than minReleaseAgeDays and newer than currentVersion. */
+/** Find an old-enough upgrade without exceeding the original target version. */
 function findBestQualifyingVersion({
 	currentVersion,
+	latestVersion,
 	publishedVersions,
 	publishTimes,
 	minReleaseAgeDays,
@@ -53,6 +54,7 @@ function findBestQualifyingVersion({
 	nowEpochMs
 }: {
 	currentVersion: string
+	latestVersion: string
 	publishedVersions: Array<string>
 	publishTimes: Record<string, string>
 	minReleaseAgeDays: number
@@ -69,6 +71,10 @@ function findBestQualifyingVersion({
 		}
 		// Must be an upgrade from current
 		if (compareSemver({ a: currentVersion, b: version }) >= 0) {
+			return false
+		}
+		// Published versions can exceed dist-tags.latest; a fallback must not.
+		if (compareSemver({ a: version, b: latestVersion }) > 0) {
 			return false
 		}
 		// Must meet the age requirement
@@ -128,6 +134,7 @@ export function filterByReleaseAge({
 		// Latest version is too young — find the best qualifying version
 		const bestVersion = findBestQualifyingVersion({
 			currentVersion: candidate.currentVersion,
+			latestVersion: candidate.latestVersion,
 			publishedVersions: metadata?.publishedVersions ?? [],
 			publishTimes,
 			minReleaseAgeDays,

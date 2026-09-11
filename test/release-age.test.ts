@@ -47,6 +47,28 @@ describe('getVersionAgeDays', () => {
 })
 
 describe('filterByReleaseAge', () => {
+  test('skips a fresh target when the only older upgrade exceeds it', () => {
+    const result = filterByReleaseAge({
+      candidates: [makeCandidate({
+        name: 'fumadocs-core',
+        currentVersion: '16.15.8',
+        latestVersion: '16.15.9',
+        changeType: 'patch'
+      })],
+      packageMetadata: new Map([
+        ['fumadocs-core', makeMetadata({
+          '16.15.8': '2026-03-20T00:00:00.000Z',
+          '16.15.9': '2026-03-30T12:00:00.000Z',
+          '17.0.0': '2026-02-01T00:00:00.000Z'
+        })]
+      ]),
+      minReleaseAgeDays: 7,
+      nowEpochMs: NOW.getTime()
+    })
+
+    expect(result.candidates).toEqual([])
+  })
+
   test('returns all candidates when minReleaseAgeDays is 0', () => {
     const candidates = [makeCandidate({ name: 'react', latestVersion: '2.0.0' })]
     const result = filterByReleaseAge({
@@ -120,7 +142,9 @@ describe('filterByReleaseAge', () => {
         '1.0.0': '2025-01-01T00:00:00.000Z',
         '1.1.0': '2026-03-10T00:00:00.000Z',
         '1.2.0': '2026-03-20T00:00:00.000Z',
-        '1.3.0': '2026-03-31T00:00:00.000Z'
+        '1.3.0': '2026-03-31T00:00:00.000Z',
+        '1.4.0': '2026-03-10T00:00:00.000Z',
+        '2.0.0': '2026-03-10T00:00:00.000Z'
       })]
     ])
 
@@ -212,7 +236,9 @@ describe('filterByReleaseAge', () => {
       ['lib', makeMetadata({
         '2.0.0-beta.1': '2025-01-01T00:00:00.000Z',
         '2.0.0-rc.1': '2026-03-10T00:00:00.000Z',
-        '2.0.0-rc.2': '2026-03-31T00:00:00.000Z'
+        '2.0.0-rc.2': '2026-03-31T00:00:00.000Z',
+        '2.0.0-rc.3': '2026-03-10T00:00:00.000Z',
+        '2.0.0': '2026-03-10T00:00:00.000Z'
       })]
     ])
 
