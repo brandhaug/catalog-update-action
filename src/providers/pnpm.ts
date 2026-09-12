@@ -99,5 +99,16 @@ export const pnpmProvider: CatalogProvider = {
 	installArtifacts: ['pnpm-lock.yaml', 'pnpm-workspace.yaml'],
 	audit: pnpmAudit,
 	parseDefinitions: parseYamlCatalogs,
+	getUpdateBlockReason: ({ content, update }) => {
+		const patches = readYamlTopLevelMap({
+			content,
+			field: 'patchedDependencies'
+		})
+		const selector = `${update.npmName}@${update.currentVersion}`
+		if (patches && Object.hasOwn(patches, selector)) {
+			return `exact-version patch ${selector} must be migrated or removed manually`
+		}
+		return null
+	},
 	applyUpdates: applyYamlCatalogUpdates
 }

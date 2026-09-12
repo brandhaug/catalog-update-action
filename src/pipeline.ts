@@ -590,13 +590,27 @@ export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 
 	// 3–4. Query registry and find updates
 	const candidates = yield* findCatalogCandidates({ entries, config })
+	const unblockedCandidates: Array<UpdateCandidate> = []
+	for (const update of candidates) {
+		const reason = Option.isSome(definitionContent)
+			? provider.getUpdateBlockReason?.({
+					content: definitionContent.value,
+					update
+				})
+			: undefined
+		if (reason) {
+			yield* Effect.logWarning(`    Skipping ${update.name}: ${reason}`)
+		} else {
+			unblockedCandidates.push(update)
+		}
+	}
 
 	// 5. Group updates and fetch release notes
 	const {
 		candidates: eligibleCandidates,
 		groups,
 		releaseNotes
-	} = yield* buildGroupedUpdates({ candidates, config })
+	} = yield* buildGroupedUpdates({ candidates: unblockedCandidates, config })
 
 	// 5b. Override pipeline
 	const { overrideBranchUpdate, overrideEntries } = yield* findOverrideUpdates({

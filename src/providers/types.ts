@@ -64,6 +64,11 @@ export type CatalogProvider = {
 	audit: AuditCapability
 	/** Extract every catalog definition from a definition file's content. */
 	parseDefinitions(input: { content: string }): Array<ParsedCatalog>
+	/** Explain a provider constraint that requires a manual update. */
+	getUpdateBlockReason?(input: {
+		content: string
+		update: UpdateCandidate
+	}): string | null
 	/** Apply catalog updates to a definition file's content. */
 	applyUpdates(input: {
 		content: string
