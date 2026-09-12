@@ -220,6 +220,40 @@ const YAML_PROVIDERS: Array<[ProviderId, string]> = [
   ['yarn', '.yarnrc.yml']
 ]
 
+describe('pnpm exact-version patches', () => {
+  const provider = getProvider('pnpm')
+  const content = `catalog:
+  '@better-auth/oauth-provider': 1.7.2
+patchedDependencies:
+  '@better-auth/oauth-provider@1.7.2': patches/oauth-provider.patch
+  'other@1.0.0': patches/other.patch
+`
+
+  test('blocks a patched version upgrade without hiding catalog entries', () => {
+    const update = makeCandidate({ name: '@better-auth/oauth-provider', currentVersion: '1.7.2', latestVersion: '1.7.3' })
+    expect(provider.getUpdateBlockReason?.({ content, update })).toContain('must be migrated or removed manually')
+    expect(provider.parseDefinitions({ content })[0]?.entries[update.name]).toBe('1.7.2')
+  })
+
+  test('matches aliases by npm package name', () => {
+    const update = makeCandidate({ name: 'oauth', npmName: '@better-auth/oauth-provider', isAlias: true, currentVersion: '1.7.2' })
+    expect(provider.getUpdateBlockReason?.({ content, update })).toContain('@better-auth/oauth-provider@1.7.2')
+  })
+
+  test('allows unrelated packages and versions', () => {
+    for (const update of [makeCandidate({ name: 'unpatched' }), makeCandidate({ name: 'other', currentVersion: '2.0.0' })]) {
+      expect(provider.getUpdateBlockReason?.({ content, update })).toBeNull()
+    }
+  })
+
+  test('allows updates without an exact-version patch', () => {
+    const update = makeCandidate({ name: 'other' })
+    for (const patchContent of ['', 'patchedDependencies:\n  other: patches/other.patch\n']) {
+      expect(provider.getUpdateBlockReason?.({ content: patchContent, update })).toBeNull()
+    }
+  })
+})
+
 describe.each(YAML_PROVIDERS)('%s provider (YAML)', (id, fileName) => {
   const provider = getProvider(id)
 
