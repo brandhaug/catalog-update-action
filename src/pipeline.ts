@@ -176,10 +176,12 @@ const findCatalogCandidates = Effect.fn('Pipeline.findCatalogCandidates')(
 const buildGroupedUpdates = Effect.fn('Pipeline.buildGroupedUpdates')(
 	function* ({
 		candidates,
-		config
+		config,
+		blockedNames
 	}: {
 		candidates: Array<UpdateCandidate>
 		config: Config
+		blockedNames: ReadonlySet<string>
 	}) {
 		const groups = new Map<string, Array<UpdateCandidate>>()
 		const releaseNotes = new Map<string, Array<VersionReleaseNote>>()
@@ -240,11 +242,21 @@ const buildGroupedUpdates = Effect.fn('Pipeline.buildGroupedUpdates')(
 			candidates: remaining,
 			groups: config.groups
 		})
+		for (const [groupName, updates] of assigned) {
+			if (updates.some((update) => blockedNames.has(update.name))) {
+				yield* Effect.logWarning(
+					`    Skipping ${groupName}: one or more grouped updates are blocked`
+				)
+				assigned.delete(groupName)
+			}
+		}
 
 		const assignedNames = new Set(
 			[...assigned.values()].flat().map((u) => u.name)
 		)
-		const unassigned = remaining.filter((c) => !assignedNames.has(c.name))
+		const unassigned = remaining.filter(
+			(c) => !assignedNames.has(c.name) && !blockedNames.has(c.name)
+		)
 		for (const candidate of unassigned) {
 			const sanitizedName = candidate.name
 				.replace(/^@/, '')
@@ -259,7 +271,12 @@ const buildGroupedUpdates = Effect.fn('Pipeline.buildGroupedUpdates')(
 			)
 		}
 
-		return { candidates: remaining, groups: assigned, releaseNotes: notes }
+		const eligibleCandidates = [...assigned.values()].flat()
+		return {
+			candidates: eligibleCandidates,
+			groups: assigned,
+			releaseNotes: notes
+		}
 	}
 )
 
@@ -590,7 +607,7 @@ export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 
 	// 3–4. Query registry and find updates
 	const candidates = yield* findCatalogCandidates({ entries, config })
-	const unblockedCandidates: Array<UpdateCandidate> = []
+	const blockedNames = new Set<string>()
 	for (const update of candidates) {
 		const reason = Option.isSome(definitionContent)
 			? provider.getUpdateBlockReason?.({
@@ -600,8 +617,7 @@ export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 			: undefined
 		if (reason) {
 			yield* Effect.logWarning(`    Skipping ${update.name}: ${reason}`)
-		} else {
-			unblockedCandidates.push(update)
+			blockedNames.add(update.name)
 		}
 	}
 
@@ -610,7 +626,7 @@ export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
 		candidates: eligibleCandidates,
 		groups,
 		releaseNotes
-	} = yield* buildGroupedUpdates({ candidates: unblockedCandidates, config })
+	} = yield* buildGroupedUpdates({ candidates, config, blockedNames })
 
 	// 5b. Override pipeline
 	const { overrideBranchUpdate, overrideEntries } = yield* findOverrideUpdates({
