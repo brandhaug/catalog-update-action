@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.7](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.6...catalog-update-action-v1.0.7) (2026-09-18)
+
+
+### Bug Fixes
+
+* **pipeline:** keep blocked dependency groups intact ([#53](https://github.com/brandhaug/catalog-update-action/issues/53)) ([4e6e6f5](https://github.com/brandhaug/catalog-update-action/commit/4e6e6f5ba7bc8dbb2fbda21afb311602186351a1))
+
+
+### Miscellaneous
+
+* **deps:** bump oxfmt from 0.67.0 to 0.68.0 ([#55](https://github.com/brandhaug/catalog-update-action/issues/55)) ([c5173a1](https://github.com/brandhaug/catalog-update-action/commit/c5173a1a5bf04597fa9fae8979b96417c97d17e4))
+* **deps:** bump oxlint from 1.82.0 to 1.83.0 ([#56](https://github.com/brandhaug/catalog-update-action/issues/56)) ([20b762c](https://github.com/brandhaug/catalog-update-action/commit/20b762c405ff9d20222157163ac4ca1d48025b98))
+
 ## [1.0.6](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.5...catalog-update-action-v1.0.6) (2026-09-12)
 
 
