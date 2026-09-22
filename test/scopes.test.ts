@@ -61,3 +61,13 @@ test('different managers inheriting root config have distinct branch namespaces'
   const scopes = await Effect.runPromise(resolveCatalogScopes({ cwd, locations: [location('.'), pnpm], configPath: '.catalog-updaterc.json' }).pipe(Effect.provide(BunFileSystem.layer)))
   expect(scopes.map(scope => scope.branchPrefix)).toEqual(['catalog-update/bun', 'catalog-update/pnpm'])
 })
+
+test('provider namespace allocation preserves named catalogs with provider names', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'catalog-scopes-'))
+  dirs.push(cwd)
+  await writeFile(join(cwd, '.catalog-updaterc.json'), '{}')
+  const pnpm: CatalogLocation = { ...location('services'), providerId: 'pnpm', definitionRelPath: 'services/pnpm-workspace.yaml' }
+  const named: CatalogLocation = { ...location('.'), definition: { catalogName: 'bun', entries: { typescript: '4.0.0' } } }
+  const scopes = await Effect.runPromise(resolveCatalogScopes({ cwd, locations: [location('.'), pnpm, named], configPath: '.catalog-updaterc.json' }).pipe(Effect.provide(BunFileSystem.layer)))
+  expect(scopes.map(scope => scope.branchPrefix)).toEqual(['catalog-update/bun-2', 'catalog-update/pnpm', 'catalog-update/bun'])
+})

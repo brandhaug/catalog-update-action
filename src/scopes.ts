@@ -7,7 +7,7 @@ export type CatalogScope = {
 	branchPrefix: string
 	branchNamespace: string
 	config: Config
-	locations: Array<CatalogLocation>
+	locations: [CatalogLocation, ...Array<CatalogLocation>]
 }
 
 export const resolveCatalogScopes = Effect.fn('Scopes.resolveCatalogScopes')(
@@ -71,17 +71,24 @@ export const resolveCatalogScopes = Effect.fn('Scopes.resolveCatalogScopes')(
 		for (const scope of resolved) {
 			owners.set(scope.branchPrefix, (owners.get(scope.branchPrefix) ?? 0) + 1)
 		}
+		const reserved = new Set(resolved.map((scope) => scope.branchPrefix))
 		for (const scope of resolved) {
-			if ((owners.get(scope.branchPrefix) ?? 0) > 1) {
-				const provider = scope.locations[0]?.providerId
-				if (provider) {
-					scope.branchNamespace = `${scope.config.branchPrefix}/${provider}`
-					scope.branchPrefix = scope.branchPrefix.replace(
-						scope.config.branchPrefix,
-						scope.branchNamespace
-					)
-				}
+			if ((owners.get(scope.branchPrefix) ?? 0) <= 1) {
+				continue
 			}
+			const provider = scope.locations[0].providerId
+			const scopeSuffix = scope.branchPrefix.slice(
+				scope.config.branchPrefix.length
+			)
+			let namespace = `${scope.config.branchPrefix}/${provider}`
+			let suffix = 2
+			while (reserved.has(`${namespace}${scopeSuffix}`)) {
+				namespace = `${scope.config.branchPrefix}/${provider}-${suffix}`
+				suffix++
+			}
+			scope.branchNamespace = namespace
+			scope.branchPrefix = `${namespace}${scopeSuffix}`
+			reserved.add(scope.branchPrefix)
 		}
 		return resolved
 	},
