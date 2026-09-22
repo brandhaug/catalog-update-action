@@ -85,7 +85,7 @@ export function buildCatalogBranchUpdate({
 	releaseNotes: Map<string, Array<VersionReleaseNote>>
 }): BranchUpdate {
 	const prefix = branchPrefix ?? config.branchPrefix
-	const branch = `${prefix}/${encodeURIComponent(groupName)}`
+	const branch = `${prefix}/${groupName}`
 	const provider = getProvider(location.providerId)
 	const definitionPath = resolveRepoPath({
 		cwd,
@@ -193,10 +193,12 @@ const mergeableStateSchema = Schema.Struct({ mergeable: mergeableSchema })
 
 export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 	cwd,
+	groupNames = [],
 	branchPrefix
 }: {
 	cwd: string
 	branchPrefix: string
+	groupNames?: Array<string>
 }) {
 	const commands = yield* Commands
 	const result = yield* commands.exec(
@@ -206,6 +208,8 @@ export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 			'list',
 			'--state',
 			'open',
+			'--limit',
+			'1000',
 			'--search',
 			`head:${branchPrefix}`,
 			'--json',
@@ -241,7 +245,8 @@ export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 			return (
 				pr.headRefName.startsWith(`${prefix}/`) &&
 				suffix.length > 0 &&
-				!suffix.includes('/')
+				(!suffix.includes('/') ||
+					(prefix === branchPrefix && groupNames.includes(suffix)))
 			)
 		})
 	)

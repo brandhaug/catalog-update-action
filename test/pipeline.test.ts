@@ -173,3 +173,42 @@ test('independently configured nested PRs are never synced or counted against ro
   expect(calls.filter(command => command.slice(0, 2).join(' ') === 'gh api')).toHaveLength(0)
   expect(JSON.parse(await readFile(join(cwd, 'milkyway/package.json'), 'utf8')).catalog.typescript).toBe('5.0.0')
 })
+
+test('configured slash-containing groups reuse their existing PR branches', async () => {
+  const { cwd, locations } = await fixture()
+  await writeFile(join(cwd, '.catalog-updaterc.json'), JSON.stringify({ audit: { enabled: false }, groups: [{ name: 'frontend/tooling', patterns: ['*'] }] }))
+  const calls: Array<Array<string>> = []
+  const commands = Commands.of({ exec: command => Effect.sync(() => {
+    calls.push(command)
+    let stdout = ''
+    if (command.slice(0, 3).join(' ') === 'gh pr list') { stdout = JSON.stringify([{ headRefName: 'catalog-update/frontend/tooling', number: 3, mergeable: 'CONFLICTING', title: 'deps' }]) }
+    if (command.slice(0, 2).join(' ') === 'gh api') { stdout = '[]' }
+    return { stdout, stderr: '', exitCode: 0 }
+  }) })
+  const result = await runFixture({ cwd, locations, commands })
+  expect(result).toEqual({ created: 0, failed: 0, rebuilt: 1 })
+  expect(calls.filter(command => command.slice(0, 3).join(' ') === 'gh pr create')).toHaveLength(0)
+  expect(calls.find(command => command[1] === 'push')).toContain('catalog-update/frontend/tooling')
+})
+
+test('nested audit drift reads the nested override file and rebuilds only its workspace', async () => {
+  const { cwd, locations } = await fixture()
+  await writeFile(join(cwd, '.catalog-updaterc.json'), JSON.stringify({ audit: { enabled: true } }))
+  const calls: Array<{ command: Array<string>, cwd: string }> = []
+  const commands = Commands.of({ exec: (command, options) => Effect.sync(() => {
+    calls.push({ command, cwd: options.cwd })
+    let stdout = ''
+    if (command.slice(0, 3).join(' ') === 'gh pr list') { stdout = JSON.stringify([{ headRefName: 'catalog-update/milkyway-override/vulnerability-fixes', number: 4, mergeable: 'MERGEABLE', title: 'security' }]) }
+    if (command.slice(0, 2).join(' ') === 'gh api') { stdout = '[]' }
+    if (command[1] === 'rev-list') { stdout = '0' }
+    if (command[1] === 'show') { stdout = JSON.stringify({ overrides: {} }) }
+    if (command[1] === 'audit') { stdout = options.cwd.endsWith('/milkyway') ? JSON.stringify({ minimist: [{ id: 1, url: 'https://example.com/advisory', title: 'vulnerable', severity: 'high', vulnerable_versions: '<1.2.8', cwe: [], cvss: { score: 8, vectorString: '' } }] }) : '{}' }
+    return { stdout, stderr: '', exitCode: 0 }
+  }) })
+  const registryService = Registry.of({ ...registry, queryNpmRegistry: () => Effect.succeed(new Map()) })
+  const result = await runFixture({ cwd, locations, commands, registryService })
+  expect(result.rebuilt).toBe(1)
+  expect(calls.find(call => call.command[1] === 'show')?.command[2]).toBe('origin/catalog-update/milkyway-override/vulnerability-fixes:milkyway/package.json')
+  expect(calls.filter(call => call.command.join(' ') === 'bun install').map(call => call.cwd)).toEqual([`${cwd}/milkyway`])
+  expect(calls.find(call => call.command[1] === 'add')?.command).toContain('milkyway/package.json')
+})

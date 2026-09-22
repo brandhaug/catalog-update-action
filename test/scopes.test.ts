@@ -52,3 +52,12 @@ test('named catalogs stay separate when they inherit the same config', async () 
   const scopes = await Effect.runPromise(resolveCatalogScopes({ cwd, locations: [location('.'), named, location('milkyway')], configPath: '.catalog-updaterc.json' }).pipe(Effect.provide(BunFileSystem.layer)))
   expect(scopes.map(scope => [scope.branchPrefix, scope.locations.length])).toEqual([['catalog-update', 2], ['catalog-update/legacy', 1]])
 })
+
+test('different managers inheriting root config have distinct branch namespaces', async () => {
+  const cwd = await mkdtemp(join(tmpdir(), 'catalog-scopes-'))
+  dirs.push(cwd)
+  await writeFile(join(cwd, '.catalog-updaterc.json'), '{}')
+  const pnpm: CatalogLocation = { ...location('services'), providerId: 'pnpm', definitionRelPath: 'services/pnpm-workspace.yaml' }
+  const scopes = await Effect.runPromise(resolveCatalogScopes({ cwd, locations: [location('.'), pnpm], configPath: '.catalog-updaterc.json' }).pipe(Effect.provide(BunFileSystem.layer)))
+  expect(scopes.map(scope => scope.branchPrefix)).toEqual(['catalog-update/bun', 'catalog-update/pnpm'])
+})

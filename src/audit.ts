@@ -309,13 +309,15 @@ export function buildOverrideBranchUpdate({
 	branchPrefix,
 	titleSuffix = '',
 	workDir,
-	providerId
+	providerId,
+	overrideRelPath
 }: {
 	overrides: Array<OverrideEntry>
 	branchPrefix: string
 	titleSuffix?: string
 	workDir: string
 	providerId: ProviderId
+	overrideRelPath?: string
 }): BranchUpdate {
 	const n = overrides.length
 	const title = `fix(security): override ${n} vulnerable transitive ${n === 1 ? 'dependency' : 'dependencies'}${titleSuffix}`
@@ -324,7 +326,7 @@ export function buildOverrideBranchUpdate({
 	const provider = getProvider(providerId)
 	const { audit } = provider
 	const overridePath = `${workDir}/${audit.overrideFile}`
-	const affectedFiles = [audit.overrideFile]
+	const affectedFiles = [overrideRelPath ?? audit.overrideFile]
 
 	return {
 		branch,
@@ -382,14 +384,16 @@ export function buildOverrideBranchUpdate({
 export function isOverrideBranchOutdated({
 	branchFiles,
 	audit,
-	expectedOverrides
+	expectedOverrides,
+	overrideRelPath
 }: {
 	/** Content of each affected file on the branch (null when absent) */
 	branchFiles: Map<string, string | null>
 	audit: AuditCapability
 	expectedOverrides: Array<OverrideEntry>
+	overrideRelPath?: string
 }): boolean {
-	const content = branchFiles.get(audit.overrideFile)
+	const content = branchFiles.get(overrideRelPath ?? audit.overrideFile)
 	if (content === null || content === undefined) {
 		return expectedOverrides.length > 0
 	}

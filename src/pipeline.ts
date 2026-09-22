@@ -228,7 +228,7 @@ const findOverrideUpdates = Effect.fn('Pipeline.findOverrideUpdates')(
 		entries: Array<CatalogEntry>
 	}) {
 		if (!run.config.audit.enabled) {
-			return { overrideBranchUpdate: null, overrideEntries: [] }
+			return null
 		}
 
 		const { audit } = getProvider(run.location.providerId)
@@ -238,7 +238,7 @@ const findOverrideUpdates = Effect.fn('Pipeline.findOverrideUpdates')(
 
 		if (Option.isNone(auditResult)) {
 			yield* Effect.logInfo('    Audit unavailable or failed, skipping')
-			return { overrideBranchUpdate: null, overrideEntries: [] }
+			return null
 		}
 
 		const catalogNames = new Set(entries.map((e) => e.name))
@@ -252,7 +252,7 @@ const findOverrideUpdates = Effect.fn('Pipeline.findOverrideUpdates')(
 
 		if (overrideEntries.length === 0) {
 			yield* Effect.logInfo('    No transitive vulnerability overrides needed')
-			return { overrideBranchUpdate: null, overrideEntries }
+			return null
 		}
 
 		const staleCount = overrideEntries.filter(
@@ -269,15 +269,29 @@ const findOverrideUpdates = Effect.fn('Pipeline.findOverrideUpdates')(
 		yield* Effect.logInfo(
 			`    Found ${overrideEntries.length} transitive vulnerability override(s): ${parts.join(', ')}`
 		)
-		const overrideBranchUpdate = buildOverrideBranchUpdate({
+		const overrideRelPath =
+			run.location.dir === '.'
+				? audit.overrideFile
+				: `${run.location.dir}/${audit.overrideFile}`
+		const branchUpdate = buildOverrideBranchUpdate({
 			overrides: overrideEntries,
+			overrideRelPath,
 			branchPrefix: run.effectiveBranchPrefix,
 			titleSuffix: run.titleSuffix,
 			workDir: run.dir.workDir,
 			providerId: run.location.providerId
 		})
 
-		return { overrideBranchUpdate, overrideEntries }
+		return {
+			branchUpdate,
+			isOutdated: ({ branchFiles }) =>
+				isOverrideBranchOutdated({
+					branchFiles,
+					audit,
+					expectedOverrides: overrideEntries,
+					overrideRelPath
+				})
+		} satisfies PrSyncPlan
 	}
 )
 
@@ -327,55 +341,6 @@ const prepareCatalog = Effect.fn('Pipeline.prepareCatalog')(function* ({
 	return { location: currentLocation, groups, releaseNotes }
 })
 
-/** A shared pin cannot advance in just one of the catalogs using it. */
-function omitPartialUpdates(catalogs: Array<PreparedCatalog>): number {
-	let removed = 0
-	let changed = true
-	while (changed) {
-		changed = false
-		const outcomes = new Map<string, Set<string | undefined>>()
-		for (const catalog of catalogs) {
-			const updates = new Map(
-				[...catalog.groups.values()]
-					.flat()
-					.map((update) => [update.name, update.latestVersion])
-			)
-			for (const [name, value] of Object.entries(
-				catalog.location.definition.entries
-			)) {
-				const key = `${name}\0${value}`
-				const versions = outcomes.get(key) ?? new Set()
-				versions.add(updates.get(name))
-				outcomes.set(key, versions)
-			}
-		}
-		const blockedGroups = new Set<string>()
-		for (const catalog of catalogs) {
-			for (const [group, updates] of catalog.groups) {
-				if (
-					updates.some(
-						(update) =>
-							(outcomes.get(
-								`${update.name}\0${catalog.location.definition.entries[update.name]}`
-							)?.size ?? 0) > 1
-					)
-				) {
-					blockedGroups.add(group)
-				}
-			}
-		}
-		for (const catalog of catalogs) {
-			for (const group of blockedGroups) {
-				if (catalog.groups.delete(group)) {
-					removed++
-					changed = true
-				}
-			}
-		}
-	}
-	return removed
-}
-
 export const processCatalogScope = Effect.fn('Pipeline.processCatalogScope')(
 	function* ({
 		scope,
@@ -398,23 +363,22 @@ export const processCatalogScope = Effect.fn('Pipeline.processCatalogScope')(
 			}
 			catalogs.push(prepared)
 		}
-		const omitted = omitPartialUpdates(catalogs)
-		if (omitted > 0) {
-			yield* Effect.logWarning(
-				`Skipped ${omitted} groups because shared catalog pins could not be updated together`
-			)
-		}
-		const catalogPlans = buildCatalogPlans({
+		const { plans: catalogPlans, omittedGroups } = buildCatalogPlans({
 			catalogs,
 			config,
 			cwd,
 			branchPrefix: scope.branchPrefix
 		})
+		if (omittedGroups > 0) {
+			yield* Effect.logWarning(
+				`Skipped ${omittedGroups} groups because shared catalog pins could not be updated together`
+			)
+		}
 		const plans = new Map<string, PrSyncPlan>()
 		const auditPrefixes = new Set<string>()
 		for (const { location } of catalogs) {
 			const prefix = [
-				config.branchPrefix,
+				scope.branchNamespace,
 				location.dir === '.' ? '' : location.dir,
 				location.definition.catalogName === 'default'
 					? ''
@@ -433,34 +397,16 @@ export const processCatalogScope = Effect.fn('Pipeline.processCatalogScope')(
 				effectiveBranchPrefix: prefix,
 				titleSuffix: location.dir === '.' ? '' : ` (in /${location.dir})`
 			}
-			const { overrideBranchUpdate, overrideEntries } =
-				yield* findOverrideUpdates({
-					run,
-					entries: parseCatalog({ catalog: location.definition.entries })
-				})
+			const overridePlan = yield* findOverrideUpdates({
+				run,
+				entries: parseCatalog({ catalog: location.definition.entries })
+			})
 			auditPrefixes.add(prefix)
-			if (overrideBranchUpdate) {
-				const { audit } = getProvider(location.providerId)
-				const overrideRelPath =
-					location.dir === '.'
-						? audit.overrideFile
-						: `${location.dir}/${audit.overrideFile}`
-				plans.set(overrideBranchUpdate.branch, {
-					branchUpdate: {
-						...overrideBranchUpdate,
-						affectedFiles: [overrideRelPath]
-					},
-					isOutdated: ({ branchFiles }) =>
-						isOverrideBranchOutdated({
-							branchFiles: new Map([
-								[audit.overrideFile, branchFiles.get(overrideRelPath) ?? null]
-							]),
-							audit,
-							expectedOverrides: overrideEntries
-						})
-				})
+			if (overridePlan) {
+				plans.set(overridePlan.branchUpdate.branch, overridePlan)
 			}
 		}
+
 		for (const [branch, plan] of catalogPlans) {
 			plans.set(branch, plan)
 		}
@@ -477,7 +423,8 @@ export const processCatalogScope = Effect.fn('Pipeline.processCatalogScope')(
 		const existing = new Map<number, ExistingPr>()
 		const catalogPrs = yield* getExistingPrs({
 			cwd,
-			branchPrefix: scope.branchPrefix
+			branchPrefix: scope.branchPrefix,
+			groupNames: config.groups.map((group) => group.name)
 		})
 		for (const pr of catalogPrs) {
 			if (pr.headRefName.startsWith(`${scope.branchPrefix}/`)) {
@@ -488,7 +435,11 @@ export const processCatalogScope = Effect.fn('Pipeline.processCatalogScope')(
 			const prs =
 				prefix === scope.branchPrefix
 					? catalogPrs
-					: yield* getExistingPrs({ cwd, branchPrefix: prefix })
+					: yield* getExistingPrs({
+							cwd,
+							branchPrefix: prefix,
+							groupNames: config.groups.map((group) => group.name)
+						})
 			const overridePrefix = getOverrideBranchPrefix({ branchPrefix: prefix })
 			for (const pr of prs) {
 				if (

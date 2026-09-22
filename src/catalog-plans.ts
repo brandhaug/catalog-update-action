@@ -19,9 +19,58 @@ export type PreparedCatalog = {
 
 type Target = { location: CatalogLocation; updates: Array<UpdateCandidate> }
 
+/** A shared pin cannot advance in just one of the catalogs using it. */
+function omitPartialUpdates(catalogs: Array<PreparedCatalog>): number {
+	let removed = 0
+	let changed = true
+	while (changed) {
+		changed = false
+		const outcomes = new Map<string, Set<string | undefined>>()
+		for (const catalog of catalogs) {
+			const updates = new Map(
+				[...catalog.groups.values()]
+					.flat()
+					.map((update) => [update.name, update.latestVersion])
+			)
+			for (const [name, value] of Object.entries(
+				catalog.location.definition.entries
+			)) {
+				const key = `${name}\0${value}`
+				const versions = outcomes.get(key) ?? new Set()
+				versions.add(updates.get(name))
+				outcomes.set(key, versions)
+			}
+		}
+		const blockedGroups = new Set<string>()
+		for (const catalog of catalogs) {
+			for (const [group, updates] of catalog.groups) {
+				if (
+					updates.some(
+						(update) =>
+							(outcomes.get(
+								`${update.name}\0${catalog.location.definition.entries[update.name]}`
+							)?.size ?? 0) > 1
+					)
+				) {
+					blockedGroups.add(group)
+				}
+			}
+		}
+		for (const catalog of catalogs) {
+			for (const group of blockedGroups) {
+				if (catalog.groups.delete(group)) {
+					removed++
+					changed = true
+				}
+			}
+		}
+	}
+	return removed
+}
+
 /** Groups sharing a package must travel together even when its starting versions differ. */
 export function buildCatalogPlans({
-	catalogs,
+	catalogs: inputCatalogs,
 	config,
 	branchPrefix,
 	cwd
@@ -30,7 +79,13 @@ export function buildCatalogPlans({
 	config: Config
 	branchPrefix: string
 	cwd: string
-}): Map<string, PrSyncPlan> {
+}) {
+	const catalogs = inputCatalogs.map((catalog) => ({
+		location: catalog.location,
+		releaseNotes: catalog.releaseNotes,
+		groups: new Map(catalog.groups)
+	}))
+	const omittedGroups = omitPartialUpdates(catalogs)
 	const groups = new Map<string, Array<Target>>()
 	for (const catalog of catalogs) {
 		for (const [name, updates] of catalog.groups) {
@@ -66,7 +121,12 @@ export function buildCatalogPlans({
 			}
 		}
 	}
-	const notes = new Map(catalogs.flatMap((c) => [...c.releaseNotes]))
+	const notes = new Map<string, Array<VersionReleaseNote>>()
+	for (const catalog of catalogs) {
+		for (const [name, releases] of catalog.releaseNotes) {
+			notes.set(name, releases)
+		}
+	}
 	const plans = new Map<string, PrSyncPlan>()
 	for (const [name, targets] of groups) {
 		const parts = targets.map((target) =>
@@ -135,5 +195,5 @@ export function buildCatalogPlans({
 				})
 		})
 	}
-	return plans
+	return { plans, omittedGroups }
 }
