@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.8](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.7...catalog-update-action-v1.0.8) (2026-09-22)
+
+
+### Bug Fixes
+
+* coordinate catalog updates across workspaces ([#58](https://github.com/brandhaug/catalog-update-action/issues/58)) ([700bab1](https://github.com/brandhaug/catalog-update-action/commit/700bab1047f3281d0031ad8f5fdc452fdf51597d))
+
 ## [1.0.7](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.6...catalog-update-action-v1.0.7) (2026-09-21)
 
 
