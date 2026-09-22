@@ -332,8 +332,13 @@ export function buildOverrideBranchUpdate({
 		body,
 		affectedFiles,
 		expectedBasenames: expectedInstallBasenames({ provider, affectedFiles }),
-		deleteLockfiles: [provider.lockfileName],
-		installCommand: provider.installCommand,
+		installs: [
+			{
+				workDir,
+				command: provider.installCommand,
+				deleteLockfiles: [provider.lockfileName]
+			}
+		],
 		apply: Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const content = yield* fs.readFileString(overridePath).pipe(

@@ -43,7 +43,7 @@ export function resolveRepoPath({
 	cwd: string
 	relPath: string
 }): string {
-	return `${cwd}/${relPath}`
+	return relPath === '.' ? cwd : `${cwd}/${relPath}`
 }
 
 // ---------------------------------------------------------------------------

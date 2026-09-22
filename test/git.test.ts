@@ -1,10 +1,11 @@
 import { describe, expect, test, afterAll } from 'bun:test'
 import { Effect } from 'effect'
+import { Commands } from '../src/commands'
 import { BunFileSystem } from '@effect/platform-bun'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits } from '../src/git'
+import { buildCatalogPrBody, buildCatalogBranchUpdate, hasHumanContentCommits, getExistingPrs } from '../src/git'
 import { type CatalogLocation, type Config, type UpdateCandidate, type VersionReleaseNote } from '../src/types'
 
 const bunTestDir = mkdtempSync(join(tmpdir(), 'git-test-bun-'))
@@ -152,7 +153,7 @@ describe('buildCatalogBranchUpdate', () => {
 
     expect(result.affectedFiles).toEqual(['package.json'])
     expect(result.expectedBasenames).toEqual(['package.json', 'bun.lock', 'bun.lockb'])
-    expect(result.installCommand).toEqual(['bun', 'install'])
+    expect(result.installs[0]?.command).toEqual(['bun', 'install'])
   })
 
   test('apply writes updated catalog to package.json on disk', async () => {
@@ -305,7 +306,7 @@ describe('buildCatalogBranchUpdate', () => {
     })
 
     expect(result.affectedFiles).toEqual(['pnpm-workspace.yaml'])
-    expect(result.installCommand).toEqual([
+    expect(result.installs[0]?.command).toEqual([
       'pnpm',
       'install',
       '--no-frozen-lockfile'
@@ -359,4 +360,11 @@ describe('hasHumanContentCommits', () => {
   test('returns false for empty commit list', () => {
     expect(hasHumanContentCommits({ raw: [] })).toBe(false)
   })
+})
+
+
+test('root PR lookup excludes nested catalogs and nested override PRs', async () => {
+  const prs = ['catalog-update/typescript', 'catalog-update/milkyway/typescript', 'catalog-update/milkyway-override/vulnerability-fixes', 'catalog-update-override/vulnerability-fixes'].map((headRefName, i) => ({ headRefName, number: i + 1, mergeable: 'MERGEABLE', title: 'deps' }))
+  const result = await Effect.runPromise(getExistingPrs({ cwd: bunTestDir, branchPrefix: 'catalog-update' }).pipe(Effect.provideService(Commands, Commands.of({ exec: () => Effect.succeed({ stdout: JSON.stringify(prs), stderr: '', exitCode: 0 }) }))))
+  expect(result.map(pr => pr.number)).toEqual([1, 4])
 })

@@ -1,19 +1,15 @@
 import { DateTime, Effect, FileSystem, Option } from 'effect'
 
-import { loadConfig } from './config'
-import { buildCatalogValue, parseCatalog } from './catalog'
+import { buildCatalogPlans, type PreparedCatalog } from './catalog-plans'
+import { type CatalogScope } from './scopes'
+import { parseCatalog } from './catalog'
 import {
 	runAudit,
 	computeOverrides,
 	buildOverrideBranchUpdate,
 	isOverrideBranchOutdated
 } from './audit'
-import {
-	getExistingPrs,
-	syncExistingPrs,
-	createPr,
-	buildCatalogBranchUpdate
-} from './git'
+import { getExistingPrs, syncExistingPrs, createPr } from './git'
 import { getProvider, type ParsedCatalog } from './providers'
 import { shouldIgnore, assignToGroups } from './groups'
 import { Registry } from './registry'
@@ -24,13 +20,12 @@ import {
 	resolveRepoPath
 } from './utils'
 import {
-	type BranchUpdate,
 	type CatalogEntry,
 	type CatalogLocation,
 	type Config,
 	type DirectoryContext,
+	type PrSyncPlan,
 	type ExistingPr,
-	type OverrideEntry,
 	type UpdateCandidate,
 	type VersionReleaseNote
 } from './types'
@@ -51,76 +46,6 @@ type DirectoryRun = {
 	titleSuffix: string
 	effectiveBranchPrefix: string
 }
-
-/**
- * DirectoryRun plus the computed update artifacts (stage 5/5b output) that
- * the PR sync and creation stages share.
- */
-type CatalogRun = DirectoryRun & {
-	groups: Map<string, Array<UpdateCandidate>>
-	releaseNotes: Map<string, Array<VersionReleaseNote>>
-	overrideBranchUpdate: BranchUpdate | null
-	overrideEntries: Array<OverrideEntry>
-}
-
-/**
- * The catalog BranchUpdate builder for one run, shared by the sync and
- * create stages so both derive branches, titles and bodies identically.
- */
-function makeCatalogBranchBuilder(catalog: CatalogRun) {
-	return (groupName: string, updates: Array<UpdateCandidate>) =>
-		buildCatalogBranchUpdate({
-			groupName,
-			updates,
-			config: catalog.config,
-			location: catalog.location,
-			cwd: catalog.dir.cwd,
-			titleSuffix: catalog.titleSuffix,
-			branchPrefix: catalog.effectiveBranchPrefix,
-			releaseNotes: catalog.releaseNotes
-		})
-}
-
-function buildDirectoryContext({
-	cwd,
-	dir
-}: {
-	cwd: string
-	dir: string
-}): DirectoryContext {
-	return {
-		cwd,
-		workDir: dir === '.' ? cwd : `${cwd}/${dir}`
-	}
-}
-
-const loadConfigForDirectory = Effect.fn('Pipeline.loadConfigForDirectory')(
-	function* ({
-		dir,
-		configPath
-	}: {
-		dir: DirectoryContext
-		configPath: string
-	}) {
-		yield* Effect.logInfo('  Loading config...')
-		const config = yield* loadConfig({
-			configPath: `${dir.workDir}/${configPath}`
-		})
-		yield* Effect.logInfo(`    Branch prefix: ${config.branchPrefix}`)
-		yield* Effect.logInfo(`    Default branch: ${config.defaultBranch}`)
-		yield* Effect.logInfo(`    Groups: ${config.groups.length}`)
-		yield* Effect.logInfo(`    Ignore rules: ${config.ignore.length}`)
-		yield* Effect.logInfo(
-			`    Audit: ${config.audit.enabled ? `enabled (minimum severity: ${config.audit.minimumSeverity})` : 'disabled'}`
-		)
-		if (config.minReleaseAgeDays > 0) {
-			yield* Effect.logInfo(
-				`    Min release age: ${config.minReleaseAgeDays} day(s)`
-			)
-		}
-		return config
-	}
-)
 
 const findCatalogCandidates = Effect.fn('Pipeline.findCatalogCandidates')(
 	function* ({
@@ -356,331 +281,270 @@ const findOverrideUpdates = Effect.fn('Pipeline.findOverrideUpdates')(
 	}
 )
 
-const syncDirectoryPrs = Effect.fn('Pipeline.syncDirectoryPrs')(function* ({
-	catalog,
-	existingPrs
-}: {
-	catalog: CatalogRun
-	existingPrs: Array<ExistingPr>
-}) {
-	const { dir, config, location, effectiveBranchPrefix } = catalog
-	const provider = getProvider(location.providerId)
-	const buildBranchUpdate = makeCatalogBranchBuilder(catalog)
-
-	const overrideBranchPrefix = getOverrideBranchPrefix({
-		branchPrefix: effectiveBranchPrefix
-	})
-	const catalogPrs = existingPrs.filter((pr) =>
-		pr.headRefName.startsWith(`${effectiveBranchPrefix}/`)
-	)
-	const overridePrs = existingPrs.filter((pr) =>
-		pr.headRefName.startsWith(`${overrideBranchPrefix}/`)
-	)
-
-	// 6b. Sync existing catalog PRs
-	yield* Effect.logInfo('  Syncing existing catalog PRs...')
-	const catalogSyncResult = yield* syncExistingPrs({
-		existingPrs: catalogPrs,
-		// Catalog branches are `${prefix}/${groupName}` by construction, so
-		// one slice recovers the group and its updates. The drift check
-		// closes over both instead of re-deriving them from branch strings.
-		resolveSyncPlan: (pr) => {
-			const groupName = pr.headRefName.slice(`${effectiveBranchPrefix}/`.length)
-			const updates = catalog.groups.get(groupName)
-			if (!updates || updates.length === 0) {
-				return null
-			}
-			return {
-				branchUpdate: buildBranchUpdate(groupName, updates),
-				isOutdated: ({ branchFiles }) => {
-					const definitionContent = branchFiles.get(location.definitionRelPath)
-					if (definitionContent === null || definitionContent === undefined) {
-						return true
-					}
-					const definitions = provider.parseDefinitions({
-						content: definitionContent
-					})
-					const definition = definitions.find(
-						(d) => d.catalogName === location.definition.catalogName
-					)
-					if (!definition) {
-						return true
-					}
-					return updates.some(
-						(update) =>
-							definition.entries[update.name] !== buildCatalogValue({ update })
-					)
-				}
-			}
-		},
-		config,
-		dir
-	})
-
-	// 6c. Sync existing override PRs
-	let overrideSyncResult = { closedCount: 0, rebuiltCount: 0 }
-	if (overridePrs.length > 0) {
-		yield* Effect.logInfo('  Syncing existing override PRs...')
-		const { audit } = provider
-		overrideSyncResult = yield* syncExistingPrs({
-			existingPrs: overridePrs,
-			resolveSyncPlan: () =>
-				catalog.overrideBranchUpdate === null
-					? null
-					: {
-							branchUpdate: catalog.overrideBranchUpdate,
-							isOutdated: ({ branchFiles }) =>
-								isOverrideBranchOutdated({
-									branchFiles,
-									audit,
-									expectedOverrides: catalog.overrideEntries
-								})
-						},
-			config,
-			dir
-		})
-	}
-
-	return {
-		closedCount: catalogSyncResult.closedCount + overrideSyncResult.closedCount,
-		rebuiltCount:
-			catalogSyncResult.rebuiltCount + overrideSyncResult.rebuiltCount
-	}
-})
-
-const createDirectoryPrs = Effect.fn('Pipeline.createDirectoryPrs')(function* ({
-	catalog,
-	existingPrs,
-	closedCount
-}: {
-	catalog: CatalogRun
-	existingPrs: Array<ExistingPr>
-	closedCount: number
-}) {
-	const { dir, config, effectiveBranchPrefix } = catalog
-	const { overrideBranchUpdate, groups } = catalog
-	const buildBranchUpdate = makeCatalogBranchBuilder(catalog)
-
-	const existingBranches = new Set(existingPrs.map((pr) => pr.headRefName))
-	// openPrCount is the single budget counter: closed PRs free their slot,
-	// each successful creation takes one.
-	let openPrCount = existingPrs.length - closedCount
-
-	yield* Effect.logInfo(
-		`  PR limit: ${config.maxOpenPrs}, existing: ${openPrCount}, available slots: ${config.maxOpenPrs - openPrCount}`
-	)
-
-	let created = 0
-	let attempted = 0
-
-	// Override PR first (security priority)
-	if (
-		overrideBranchUpdate &&
-		openPrCount < config.maxOpenPrs &&
-		!existingBranches.has(overrideBranchUpdate.branch)
-	) {
-		attempted++
-		const success = yield* createPr({
-			branchUpdate: overrideBranchUpdate,
-			config,
-			dir
-		})
-		if (success) {
-			created++
-			openPrCount++
-		}
-	}
-
-	// Catalog PRs. Each createPr checks out, installs, commits and
-	// force-pushes its own branch in the shared working tree, so PRs are
-	// created one at a time.
-	for (const [groupName, updates] of groups) {
-		if (openPrCount >= config.maxOpenPrs) {
-			yield* Effect.logInfo(
-				`  Reached PR limit (${config.maxOpenPrs}). Stopping.`
-			)
-			break
-		}
-
-		const branch = `${effectiveBranchPrefix}/${groupName}`
-		if (existingBranches.has(branch)) {
-			continue
-		}
-
-		attempted++
-		const success = yield* createPr({
-			branchUpdate: buildBranchUpdate(groupName, updates),
-			config,
-			dir
-		})
-		if (success) {
-			created++
-			openPrCount++
-		}
-	}
-
-	// Counting attempts rather than a pre-computed expectation: a failed
-	// creation frees its slot for a later group, but the failure itself must
-	// still surface in the summary.
-	const failed = attempted - created
-
-	return { created, failed }
-})
-
-/**
- * Runs the full update pipeline for one catalog location: load config,
- * re-parse the definition, query the registry, group updates, run the
- * provider audit, then sync and create PRs. A fatal git failure (the working
- * tree could not be restored) surfaces as a GitError to the caller.
- */
-export const processCatalog = Effect.fn('Pipeline.processCatalog')(function* ({
+const prepareCatalog = Effect.fn('Pipeline.prepareCatalog')(function* ({
 	location,
-	cwd,
-	configPath,
-	dryRun
+	config,
+	cwd
 }: {
 	location: CatalogLocation
+	config: Config
 	cwd: string
-	configPath: string
-	dryRun: boolean
 }) {
-	const dir = buildDirectoryContext({ cwd, dir: location.dir })
 	const provider = getProvider(location.providerId)
-	const catalogName = location.definition.catalogName
-
-	// 1. Load config
-	const config = yield* loadConfigForDirectory({ dir, configPath })
-
-	// Named catalogs get their own branch segment; the default catalog keeps
-	// the historical branch layout.
-	const prefixSegments = [config.branchPrefix]
-	const titleParts: Array<string> = []
-	if (location.dir !== '.') {
-		prefixSegments.push(location.dir)
-		titleParts.push(`in /${location.dir}`)
-	}
-	if (catalogName !== 'default') {
-		prefixSegments.push(catalogName)
-		titleParts.push(`catalog ${catalogName}`)
-	}
-	const effectiveBranchPrefix = prefixSegments.filter(Boolean).join('/')
-	const titleSuffix = titleParts.length > 0 ? ` (${titleParts.join(', ')})` : ''
-
-	const run: DirectoryRun = {
-		dir,
-		config,
-		location,
-		titleSuffix,
-		effectiveBranchPrefix
-	}
-
-	// 2. Re-read the catalog definition (discovery may have run before a fetch)
-	yield* Effect.logInfo('  Parsing catalog...')
 	const fs = yield* FileSystem.FileSystem
-	const definitionContent = yield* fs
+	const content = yield* fs
 		.readFileString(
-			resolveRepoPath({ cwd: dir.cwd, relPath: location.definitionRelPath })
+			resolveRepoPath({ cwd, relPath: location.definitionRelPath })
 		)
 		.pipe(Effect.option)
-	const definition: ParsedCatalog | undefined = Option.isSome(definitionContent)
+	const definition: ParsedCatalog | undefined = Option.isSome(content)
 		? provider
-				.parseDefinitions({ content: definitionContent.value })
-				.find((d) => d.catalogName === catalogName)
+				.parseDefinitions({ content: content.value })
+				.find((d) => d.catalogName === location.definition.catalogName)
 		: undefined
-
-	if (Option.isNone(definitionContent)) {
-		yield* Effect.logWarning(
-			`  Warning: could not read ${location.definitionRelPath}: file unavailable`
-		)
+	if (!definition || Option.isNone(content)) {
+		return null
 	}
-	if (!definition) {
-		yield* Effect.logError(
-			`  No catalog "${catalogName}" found in ${location.definitionRelPath}`
-		)
-		return { created: 0, failed: 0, rebuilt: 0 }
-	}
-
+	const currentLocation = { ...location, definition }
 	const entries = parseCatalog({ catalog: definition.entries })
-	yield* Effect.logInfo(
-		`    Found ${entries.length} catalog entries (${provider.id}, ${location.definitionRelPath})`
-	)
-
-	// 3–4. Query registry and find updates
 	const candidates = yield* findCatalogCandidates({ entries, config })
 	const blockedNames = new Set<string>()
 	for (const update of candidates) {
-		const reason = Option.isSome(definitionContent)
-			? provider.getUpdateBlockReason?.({
-					content: definitionContent.value,
-					update
-				})
-			: undefined
+		const reason = provider.getUpdateBlockReason?.({
+			content: content.value,
+			update
+		})
 		if (reason) {
 			yield* Effect.logWarning(`    Skipping ${update.name}: ${reason}`)
 			blockedNames.add(update.name)
 		}
 	}
-
-	// 5. Group updates and fetch release notes
-	const {
-		candidates: eligibleCandidates,
-		groups,
-		releaseNotes
-	} = yield* buildGroupedUpdates({ candidates, config, blockedNames })
-
-	// 5b. Override pipeline
-	const { overrideBranchUpdate, overrideEntries } = yield* findOverrideUpdates({
-		run,
-		entries
+	const { groups, releaseNotes } = yield* buildGroupedUpdates({
+		candidates,
+		config,
+		blockedNames
 	})
-
-	if (eligibleCandidates.length === 0 && !overrideBranchUpdate) {
-		yield* Effect.logInfo('  No updates available')
-		return { created: 0, failed: 0, rebuilt: 0 }
-	}
-
-	if (dryRun) {
-		const parts: Array<string> = []
-		if (groups.size > 0) {
-			parts.push(`${groups.size} catalog PRs`)
-		}
-		if (overrideBranchUpdate) {
-			parts.push('1 override PR')
-		}
-		yield* Effect.logInfo(`  [DRY RUN] Would create ${parts.join(' and ')}`)
-		return { created: 0, failed: 0, rebuilt: 0 }
-	}
-
-	// Everything the PR stages share, now that the update artifacts exist.
-	const catalog: CatalogRun = {
-		...run,
-		groups,
-		releaseNotes,
-		overrideBranchUpdate,
-		overrideEntries
-	}
-
-	// 6–6c. Sync existing PRs
-	yield* Effect.logInfo('  Checking existing PRs...')
-	const existingPrs = yield* getExistingPrs({
-		cwd: dir.cwd,
-		branchPrefix: effectiveBranchPrefix
-	})
-	yield* Effect.logInfo(
-		`    Found ${existingPrs.length} existing catalog-update PRs`
-	)
-
-	const { closedCount, rebuiltCount } = yield* syncDirectoryPrs({
-		catalog,
-		existingPrs
-	})
-
-	// 7. Create PRs
-	const { created, failed } = yield* createDirectoryPrs({
-		catalog,
-		existingPrs,
-		closedCount
-	})
-
-	return { created, failed, rebuilt: rebuiltCount }
+	return { location: currentLocation, groups, releaseNotes }
 })
+
+/** A shared pin cannot advance in just one of the catalogs using it. */
+function omitPartialUpdates(catalogs: Array<PreparedCatalog>): number {
+	let removed = 0
+	let changed = true
+	while (changed) {
+		changed = false
+		const outcomes = new Map<string, Set<string | undefined>>()
+		for (const catalog of catalogs) {
+			const updates = new Map(
+				[...catalog.groups.values()]
+					.flat()
+					.map((update) => [update.name, update.latestVersion])
+			)
+			for (const [name, value] of Object.entries(
+				catalog.location.definition.entries
+			)) {
+				const key = `${name}\0${value}`
+				const versions = outcomes.get(key) ?? new Set()
+				versions.add(updates.get(name))
+				outcomes.set(key, versions)
+			}
+		}
+		const blockedGroups = new Set<string>()
+		for (const catalog of catalogs) {
+			for (const [group, updates] of catalog.groups) {
+				if (
+					updates.some(
+						(update) =>
+							(outcomes.get(
+								`${update.name}\0${catalog.location.definition.entries[update.name]}`
+							)?.size ?? 0) > 1
+					)
+				) {
+					blockedGroups.add(group)
+				}
+			}
+		}
+		for (const catalog of catalogs) {
+			for (const group of blockedGroups) {
+				if (catalog.groups.delete(group)) {
+					removed++
+					changed = true
+				}
+			}
+		}
+	}
+	return removed
+}
+
+export const processCatalogScope = Effect.fn('Pipeline.processCatalogScope')(
+	function* ({
+		scope,
+		cwd,
+		dryRun
+	}: {
+		scope: CatalogScope
+		cwd: string
+		dryRun: boolean
+	}) {
+		const { config } = scope
+		const catalogs: Array<PreparedCatalog> = []
+		for (const location of scope.locations) {
+			const prepared = yield* prepareCatalog({ location, config, cwd })
+			if (!prepared) {
+				yield* Effect.logError(
+					`Cannot read catalog ${location.definitionRelPath}; skipping the entire shared scope`
+				)
+				return { created: 0, failed: 1, rebuilt: 0 }
+			}
+			catalogs.push(prepared)
+		}
+		const omitted = omitPartialUpdates(catalogs)
+		if (omitted > 0) {
+			yield* Effect.logWarning(
+				`Skipped ${omitted} groups because shared catalog pins could not be updated together`
+			)
+		}
+		const catalogPlans = buildCatalogPlans({
+			catalogs,
+			config,
+			cwd,
+			branchPrefix: scope.branchPrefix
+		})
+		const plans = new Map<string, PrSyncPlan>()
+		const auditPrefixes = new Set<string>()
+		for (const { location } of catalogs) {
+			const prefix = [
+				config.branchPrefix,
+				location.dir === '.' ? '' : location.dir,
+				location.definition.catalogName === 'default'
+					? ''
+					: location.definition.catalogName
+			]
+				.filter(Boolean)
+				.join('/')
+			const dir = {
+				cwd,
+				workDir: resolveRepoPath({ cwd, relPath: location.dir })
+			}
+			const run = {
+				dir,
+				config,
+				location,
+				effectiveBranchPrefix: prefix,
+				titleSuffix: location.dir === '.' ? '' : ` (in /${location.dir})`
+			}
+			const { overrideBranchUpdate, overrideEntries } =
+				yield* findOverrideUpdates({
+					run,
+					entries: parseCatalog({ catalog: location.definition.entries })
+				})
+			auditPrefixes.add(prefix)
+			if (overrideBranchUpdate) {
+				const { audit } = getProvider(location.providerId)
+				const overrideRelPath =
+					location.dir === '.'
+						? audit.overrideFile
+						: `${location.dir}/${audit.overrideFile}`
+				plans.set(overrideBranchUpdate.branch, {
+					branchUpdate: {
+						...overrideBranchUpdate,
+						affectedFiles: [overrideRelPath]
+					},
+					isOutdated: ({ branchFiles }) =>
+						isOverrideBranchOutdated({
+							branchFiles: new Map([
+								[audit.overrideFile, branchFiles.get(overrideRelPath) ?? null]
+							]),
+							audit,
+							expectedOverrides: overrideEntries
+						})
+				})
+			}
+		}
+		for (const [branch, plan] of catalogPlans) {
+			plans.set(branch, plan)
+		}
+		if (dryRun) {
+			yield* Effect.logInfo(
+				`  [DRY RUN] Would create ${plans.size} PRs across ${catalogs.length} catalogs`
+			)
+			return { created: 0, failed: 0, rebuilt: 0 }
+		}
+		if (plans.size === 0) {
+			yield* Effect.logInfo('  No updates available')
+			return { created: 0, failed: 0, rebuilt: 0 }
+		}
+		const existing = new Map<number, ExistingPr>()
+		const catalogPrs = yield* getExistingPrs({
+			cwd,
+			branchPrefix: scope.branchPrefix
+		})
+		for (const pr of catalogPrs) {
+			if (pr.headRefName.startsWith(`${scope.branchPrefix}/`)) {
+				existing.set(pr.number, pr)
+			}
+		}
+		for (const prefix of auditPrefixes) {
+			const prs =
+				prefix === scope.branchPrefix
+					? catalogPrs
+					: yield* getExistingPrs({ cwd, branchPrefix: prefix })
+			const overridePrefix = getOverrideBranchPrefix({ branchPrefix: prefix })
+			for (const pr of prs) {
+				if (
+					prefix !== scope.branchPrefix &&
+					pr.headRefName.startsWith(`${prefix}/`)
+				) {
+					const canonicalBranch = `${scope.branchPrefix}/${pr.headRefName.slice(prefix.length + 1)}`
+					const plan = plans.get(canonicalBranch)
+					const canonicalExists = [...existing.values()].some(
+						(candidate) => candidate.headRefName === canonicalBranch
+					)
+					if (plan && !canonicalExists) {
+						plans.delete(canonicalBranch)
+						plans.set(pr.headRefName, {
+							...plan,
+							branchUpdate: { ...plan.branchUpdate, branch: pr.headRefName }
+						})
+						existing.set(pr.number, pr)
+					}
+				}
+				if (pr.headRefName.startsWith(`${overridePrefix}/`)) {
+					existing.set(pr.number, pr)
+				}
+			}
+		}
+		const dir = { cwd, workDir: resolveRepoPath({ cwd, relPath: scope.dir }) }
+		const existingPrs = [...existing.values()]
+		const sync = yield* syncExistingPrs({
+			existingPrs,
+			resolveSyncPlan: (pr) => plans.get(pr.headRefName) ?? null,
+			config,
+			dir
+		})
+		const existingBranches = new Set(existingPrs.map((pr) => pr.headRefName))
+		let open = existingPrs.length - sync.closedCount
+		let created = 0
+		let failed = 0
+		for (const [branch, plan] of plans) {
+			if (open >= config.maxOpenPrs) {
+				break
+			}
+			if (existingBranches.has(branch)) {
+				continue
+			}
+			const success = yield* createPr({
+				branchUpdate: plan.branchUpdate,
+				config,
+				dir
+			})
+			if (success) {
+				created++
+				open++
+			} else {
+				failed++
+			}
+		}
+		return { created, failed, rebuilt: sync.rebuiltCount }
+	}
+)
