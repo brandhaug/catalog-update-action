@@ -100,7 +100,7 @@ jobs:
 
 | Input | Default | Description |
 | --- | --- | --- |
-| `config` | `.catalog-updaterc.json` | Path to the config file (relative to each discovered directory) |
+| `config` | `.catalog-updaterc.json` | Config filename, resolved in each catalog directory and then its ancestors up to the repository root |
 | `dry-run` | `false` | Preview updates without creating PRs |
 | `token` | `github.token` | GitHub token for creating PRs. Use a PAT or GitHub App token to trigger downstream workflows |
 | `exclude-directories` | `''` | Comma-separated directories to exclude from catalog discovery (supports glob patterns) |
@@ -155,6 +155,16 @@ Create a `.catalog-updaterc.json` in your repository root:
 ```
 
 > **Tip:** Add the `$schema` field to get autocomplete and validation in your IDE.
+
+### Multiple workspaces
+
+A catalog uses the nearest config found in its directory or an ancestor, stopping at the repository root. A directory-local config replaces the inherited config. If no config exists, each catalog uses defaults independently. An absolute `--config` path explicitly shares that file.
+
+Catalogs with the same package manager, catalog name and resolved config share an update scope. For example, root `package.json` and `milkyway/package.json` both inherit a root `.catalog-updaterc.json`. Each update group gets one PR containing changes to both catalogs where applicable. All affected workspaces run their own install before the commit, so both lockfiles travel with shared dependency updates. The PR limit applies to the whole scope. Named catalogs remain separate.
+
+Identical shared pins advance together. If a lookup or provider restriction prevents one copy from updating, the affected group is skipped across the scope. Overlapping groups are combined when they update the same package. Audit overrides remain workspace-specific.
+
+PR synchronization only manages branches belonging to the scope. When moving a config to an ancestor, an existing matching workspace PR can be reused and rebuilt with all affected catalogs. Independently configured workspaces keep their own PRs and policies.
 
 ### Options
 

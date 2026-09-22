@@ -93,14 +93,12 @@ export type BranchUpdate = {
 	expectedBasenames: Array<string>
 	/** Writes the update into the checked-out working tree. */
 	apply: Effect.Effect<void, BranchApplyError, FileSystem.FileSystem>
-	/**
-	 * Lockfiles (workDir-relative) to delete before running install, forcing
-	 * full re-resolution. Needed for override branches because range-based
-	 * overrides are ignored for already-locked packages.
-	 */
-	deleteLockfiles?: Array<string>
-	/** Install command refreshing the lockfile after applying the update. */
-	installCommand: Array<string>
+	/** Each workspace installs only after every manifest has been updated. */
+	installs: Array<{
+		workDir: string
+		command: Array<string>
+		deleteLockfiles?: Array<string>
+	}>
 }
 
 /**

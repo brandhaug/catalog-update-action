@@ -3,7 +3,7 @@ description: 'Automated dependency updates for catalog: protocol monorepos (Bun,
 
 inputs:
   config:
-    description: 'Path to .catalog-updaterc.json config file (relative to each discovered directory)'
+    description: 'Config filename, searched from each catalog directory up to the repository root'
     default: '.catalog-updaterc.json'
   dry-run:
     description: 'Preview updates without creating PRs'

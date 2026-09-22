@@ -5,7 +5,8 @@ import { version as packageVersion } from '../package.json'
 import { Commands } from './commands'
 import { discoverCatalogLocations } from './discover'
 import { plainLoggerLayer } from './logging'
-import { processCatalog } from './pipeline'
+import { processCatalogScope } from './pipeline'
+import { resolveCatalogScopes } from './scopes'
 import { Registry } from './registry'
 
 // ---------------------------------------------------------------------------
@@ -182,7 +183,13 @@ const mainProgram = Effect.fn('Main.run')(function* (
 			.join(', ')}`
 	)
 
-	// 2. Process each location
+	const scopes = yield* resolveCatalogScopes({
+		cwd,
+		locations,
+		configPath: options.configPath
+	})
+
+	// 2. Process each scope
 	let totalCreated = 0
 	let totalFailed = 0
 	let totalRebuilt = 0
@@ -190,19 +197,20 @@ const mainProgram = Effect.fn('Main.run')(function* (
 	// Locations are processed one at a time on purpose: each one checks out
 	// branches and runs installs in the shared working tree, so running them
 	// concurrently would race the same files.
-	for (const location of locations) {
-		const label =
-			location.dir === '.'
-				? `(root, ${location.providerId})`
-				: `/${location.dir} (${location.providerId})`
+	for (const scope of scopes) {
+		const label = scope.locations
+			.map(
+				(location) =>
+					`${location.dir} (${location.providerId}:${location.definition.catalogName})`
+			)
+			.join(', ')
 		yield* Effect.logInfo(`\n${'='.repeat(60)}`)
 		yield* Effect.logInfo(`Processing ${label}`)
 		yield* Effect.logInfo('='.repeat(60))
 
-		const result = yield* processCatalog({
-			location,
+		const result = yield* processCatalogScope({
+			scope,
 			cwd,
-			configPath: options.configPath,
 			dryRun: options.dryRun
 		}).pipe(
 			// Best-effort recovery: return to a clean default branch state so

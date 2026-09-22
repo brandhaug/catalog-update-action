@@ -105,7 +105,12 @@ export function buildCatalogBranchUpdate({
 		body,
 		affectedFiles,
 		expectedBasenames: expectedInstallBasenames({ provider, affectedFiles }),
-		installCommand: provider.installCommand,
+		installs: [
+			{
+				workDir: resolveRepoPath({ cwd, relPath: location.dir }),
+				command: provider.installCommand
+			}
+		],
 		apply: Effect.gen(function* () {
 			const fs = yield* FileSystem.FileSystem
 			const content = yield* fs.readFileString(definitionPath).pipe(
@@ -188,10 +193,12 @@ const mergeableStateSchema = Schema.Struct({ mergeable: mergeableSchema })
 
 export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 	cwd,
+	groupNames = [],
 	branchPrefix
 }: {
 	cwd: string
 	branchPrefix: string
+	groupNames?: Array<string>
 }) {
 	const commands = yield* Commands
 	const result = yield* commands.exec(
@@ -201,6 +208,8 @@ export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 			'list',
 			'--state',
 			'open',
+			'--limit',
+			'1000',
 			'--search',
 			`head:${branchPrefix}`,
 			'--json',
@@ -229,10 +238,17 @@ export const getExistingPrs = Effect.fn('Git.getExistingPrs')(function* ({
 		)
 		return []
 	}
-	return decoded.value.filter(
-		(pr) =>
-			pr.headRefName.startsWith(`${branchPrefix}/`) ||
-			pr.headRefName.startsWith(`${getOverrideBranchPrefix({ branchPrefix })}/`)
+	const prefixes = [branchPrefix, getOverrideBranchPrefix({ branchPrefix })]
+	return decoded.value.filter((pr) =>
+		prefixes.some((prefix) => {
+			const suffix = pr.headRefName.slice(prefix.length + 1)
+			return (
+				pr.headRefName.startsWith(`${prefix}/`) &&
+				suffix.length > 0 &&
+				(!suffix.includes('/') ||
+					(prefix === branchPrefix && groupNames.includes(suffix)))
+			)
+		})
 	)
 })
 
@@ -413,16 +429,9 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 	config: Config
 	dir: DirectoryContext
 }) {
-	const {
-		branch,
-		title,
-		apply,
-		affectedFiles,
-		expectedBasenames,
-		deleteLockfiles,
-		installCommand
-	} = branchUpdate
-	const { cwd, workDir } = dir
+	const { branch, title, apply, affectedFiles, expectedBasenames, installs } =
+		branchUpdate
+	const { cwd } = dir
 
 	const commands = yield* Commands
 	const fs = yield* FileSystem.FileSystem
@@ -451,33 +460,22 @@ const updateBranch = Effect.fn('Git.updateBranch')(function* ({
 		return yield* fail(`  ${String(applied.failure)}`)
 	}
 
-	// Range-based override syntax is ignored for already-locked packages.
-	// Deleting the lockfile forces a full re-resolution so overrides apply.
-	for (const lockfileName of deleteLockfiles ?? []) {
-		const lockfilePath = `${workDir}/${lockfileName}`
-		const exists = yield* fs
-			.exists(lockfilePath)
-			.pipe(Effect.catch(() => Effect.succeed(false)))
-		if (exists) {
-			yield* fs.remove(lockfilePath).pipe(
-				Effect.mapError(
-					(cause) =>
-						new GitError({
-							operation: 'Git.updateBranch.removeLockfile',
-							cause
-						})
-				)
-			)
-			yield* Effect.logInfo(
-				`  Deleted ${lockfileName} to force re-resolution of overrides`
-			)
+	for (const install of installs) {
+		for (const lockfileName of install.deleteLockfiles ?? []) {
+			const lockfilePath = `${install.workDir}/${lockfileName}`
+			const exists = yield* fs.exists(lockfilePath).pipe(Effect.orDie)
+			if (exists) {
+				const removed = yield* fs.remove(lockfilePath).pipe(Effect.result)
+				if (removed._tag === 'Failure') {
+					return yield* fail(`  Failed to remove ${lockfilePath}`)
+				}
+			}
 		}
-	}
-
-	yield* Effect.logInfo('  Running install...')
-	const installResult = yield* execLogged(installCommand, workDir)
-	if (installResult.exitCode !== 0) {
-		return yield* fail(`  Failed to run install for branch "${branch}"`)
+		yield* Effect.logInfo(`  Running install in ${install.workDir}...`)
+		const installed = yield* execLogged(install.command, install.workDir)
+		if (installed.exitCode !== 0) {
+			return yield* fail(`  Failed to run install for branch "${branch}"`)
+		}
 	}
 
 	const diffResult = yield* execLogged(['git', 'diff', '--name-only'], cwd)

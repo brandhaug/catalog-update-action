@@ -363,8 +363,8 @@ describe('buildOverrideBranchUpdate', () => {
     })
 
     expect(result.affectedFiles).toEqual(['package.json'])
-    expect(result.deleteLockfiles).toEqual(['bun.lock'])
-    expect(result.installCommand).toEqual(['bun', 'install'])
+    expect(result.installs[0]?.deleteLockfiles).toEqual(['bun.lock'])
+    expect(result.installs[0]?.command).toEqual(['bun', 'install'])
   })
 
   test('computeOverrideMap removes stale tool overrides and preserves user overrides', () => {
