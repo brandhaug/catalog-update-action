@@ -74,9 +74,10 @@ function splitCodeSegments(body: string): Array<CodeSegment> {
 		}
 
 		const open = closer === 0 ? line.match(FENCE_OPEN_PATTERN) : null
-		if (open) {
+		const openingMarker = open?.[1]
+		if (openingMarker) {
 			fenceCloser = new RegExp(
-				`^ {0,3}${open[1][0]}{${open[1].length},}[ \t\r]*$`
+				`^ {0,3}${openingMarker[0]}{${openingMarker.length},}[ \t\r]*$`
 			)
 			append(raw, true)
 			continue
