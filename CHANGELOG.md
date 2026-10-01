@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.0.9](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.8...catalog-update-action-v1.0.9) (2026-10-01)
+
+
+### Bug Fixes
+
+* **deps:** upgrade to stable Effect 4 ([#64](https://github.com/brandhaug/catalog-update-action/issues/64)) ([3681139](https://github.com/brandhaug/catalog-update-action/commit/36811397d7da25a96019eca8aef5c23b6a2312d6))
+
+
+### Miscellaneous
+
+* **deps:** bump oxfmt from 0.68.0 to 0.70.0 ([#60](https://github.com/brandhaug/catalog-update-action/issues/60)) ([56eb53b](https://github.com/brandhaug/catalog-update-action/commit/56eb53b78e323b83c44af8e4f9fdbfe6ea6c408b))
+* **deps:** bump oxlint from 1.83.0 to 1.85.0 ([#61](https://github.com/brandhaug/catalog-update-action/issues/61)) ([25c1881](https://github.com/brandhaug/catalog-update-action/commit/25c1881177ab8585292483853dbd1e52e182ec04))
+* **deps:** bump oxlint-tsgolint from 7.0.2002 to 7.0.2003 ([#63](https://github.com/brandhaug/catalog-update-action/issues/63)) ([85d0cf6](https://github.com/brandhaug/catalog-update-action/commit/85d0cf60fd0f30182f42c2844efe6d3979c0642d))
+
 ## [1.0.8](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.7...catalog-update-action-v1.0.8) (2026-09-22)
 
 
