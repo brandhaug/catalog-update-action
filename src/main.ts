@@ -274,7 +274,7 @@ const run = async (): Promise<void> => {
 		// Prefer the environment variable (safe from shell injection in GitHub
 		// Actions), fall back to the CLI arg for local usage.
 		const envExclude = yield* Config.option(
-			Config.string('CATALOG_UPDATE_EXCLUDE')
+			Config.String('CATALOG_UPDATE_EXCLUDE')
 		)
 		const rawExclude = Option.isSome(envExclude)
 			? envExclude.value

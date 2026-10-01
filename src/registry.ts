@@ -12,7 +12,7 @@ import {
 	HttpClient,
 	HttpClientRequest,
 	HttpClientResponse
-} from 'effect/unstable/http'
+} from 'effect/http'
 import {
 	type CatalogEntry,
 	type GitHubRepo,
@@ -111,7 +111,7 @@ export class Registry extends Context.Service<
 				// transient set fetchWithRetry used to handle by hand.
 				HttpClient.retryTransient({ schedule: RETRY_SCHEDULE, times: 1 })
 			)
-			const githubToken = yield* Config.option(Config.string('GITHUB_TOKEN'))
+			const githubToken = yield* Config.option(Config.String('GITHUB_TOKEN'))
 
 			/**
 			 * Execute a request and decode the body with `schema`, classifying the

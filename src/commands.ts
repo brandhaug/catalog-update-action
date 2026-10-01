@@ -1,7 +1,7 @@
 import { BunChildProcessSpawner, BunServices } from '@effect/platform-bun'
 import { Context, Effect, Layer, Stream } from 'effect'
 import { type PlatformError } from 'effect/PlatformError'
-import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
+import { ChildProcess, ChildProcessSpawner } from 'effect/process'
 
 // ---------------------------------------------------------------------------
 // Types
