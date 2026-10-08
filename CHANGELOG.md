@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.11](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.10...catalog-update-action-v1.0.11) (2026-10-08)
+
+
+### Bug Fixes
+
+* **security:** override 1 vulnerable transitive dependency ([#68](https://github.com/brandhaug/catalog-update-action/issues/68)) ([bb44a69](https://github.com/brandhaug/catalog-update-action/commit/bb44a69896eeca9d1a9621c5db9271584e45b472))
+
+
+### Miscellaneous
+
+* **deps:** bump oxfmt from 0.71.0 to 0.72.0 ([#70](https://github.com/brandhaug/catalog-update-action/issues/70)) ([ed7ca18](https://github.com/brandhaug/catalog-update-action/commit/ed7ca18be77c16d4c79f3d1bf5735fecc9a1f6ac))
+* **deps:** bump oxlint from 1.86.0 to 1.87.0 ([#71](https://github.com/brandhaug/catalog-update-action/issues/71)) ([983cda1](https://github.com/brandhaug/catalog-update-action/commit/983cda1314ed3e004b906d4fed2c855457c566a4))
+
 ## [1.0.10](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.9...catalog-update-action-v1.0.10) (2026-10-01)
 
 
