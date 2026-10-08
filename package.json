@@ -50,7 +50,7 @@
     "ultracite": "7.10.6"
   },
   "catalog": {
-    "oxfmt": "0.71.0",
+    "oxfmt": "0.72.0",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
     "@types/bun": "1.4.2"
