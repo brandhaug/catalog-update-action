@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.11](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.10...catalog-update-action-v1.0.11) (2026-10-16)
+
+
+### Bug Fixes
+
+* **security:** override 1 vulnerable transitive dependency ([#68](https://github.com/brandhaug/catalog-update-action/issues/68)) ([bb44a69](https://github.com/brandhaug/catalog-update-action/commit/bb44a69896eeca9d1a9621c5db9271584e45b472))
+
+
+### Miscellaneous
+
+* **deps:** bump @types/bun from 1.4.2 to 1.4.3 ([#73](https://github.com/brandhaug/catalog-update-action/issues/73)) ([b7e5cc9](https://github.com/brandhaug/catalog-update-action/commit/b7e5cc9c7e08cc19d4bad8e952e85bc63a114bcf))
+* **deps:** bump oxfmt from 0.71.0 to 0.72.0 ([#70](https://github.com/brandhaug/catalog-update-action/issues/70)) ([ed7ca18](https://github.com/brandhaug/catalog-update-action/commit/ed7ca18be77c16d4c79f3d1bf5735fecc9a1f6ac))
+* **deps:** bump oxfmt from 0.72.0 to 0.73.0 ([#74](https://github.com/brandhaug/catalog-update-action/issues/74)) ([5ed1829](https://github.com/brandhaug/catalog-update-action/commit/5ed1829da7e0f2d609476538f307749f97d6b1f9))
+* **deps:** bump oxlint from 1.86.0 to 1.87.0 ([#71](https://github.com/brandhaug/catalog-update-action/issues/71)) ([983cda1](https://github.com/brandhaug/catalog-update-action/commit/983cda1314ed3e004b906d4fed2c855457c566a4))
+* **deps:** bump oxlint from 1.87.0 to 1.88.0 ([#75](https://github.com/brandhaug/catalog-update-action/issues/75)) ([61e44af](https://github.com/brandhaug/catalog-update-action/commit/61e44af0756b3da8ec055e134b124bafab3d7a7e))
+* **deps:** bump oxlint-tsgolint from 7.0.2003 to 7.0.2004 ([#72](https://github.com/brandhaug/catalog-update-action/issues/72)) ([f477549](https://github.com/brandhaug/catalog-update-action/commit/f477549162eabbb8d335efd669173adb5e1d7b58))
+
 ## [1.0.10](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.9...catalog-update-action-v1.0.10) (2026-10-01)
 
 
