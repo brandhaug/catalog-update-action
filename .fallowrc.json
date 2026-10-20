@@ -36,11 +36,5 @@
       "policyViolations": 0
     }
   },
-  "ignoreDependencies": [
-    // ultracite is consumed at its raw config path, not imported by name:
-    // .oxlintrc.json loads the vendored anti-slop plugin directly from
-    // ./node_modules/ultracite/config/oxlint/anti-slop/plugin.mjs, which
-    // fallow's import graph cannot see.
-    "ultracite"
-  ]
+  "ignorePatterns": ["vendor/**"]
 }

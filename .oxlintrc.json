@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["vendor/**"],
   // This repo is a small Bun/TypeScript CLI tool. It has no DOM, no React
   // code, and no web surface, so the web/frontend plugins (react-hooks,
   // jsx-a11y, react-perf, vue) are absent. The `react` plugin itself is loaded
@@ -19,11 +20,9 @@
   ],
   "jsPlugins": [
     {
-      // anti-slop (upstream dmmulroy/anti-slop, vendored by ultracite — not
-      // published to npm). plugin.mjs is not in ultracite's exports map, so
-      // the specifier has to be a path.
+      // Exact upstream bundle and license; provenance in vendor/anti-slop/README.md.
       "name": "anti-slop",
-      "specifier": "./node_modules/ultracite/config/oxlint/anti-slop/plugin.mjs"
+      "specifier": "./vendor/anti-slop/plugin.mjs"
     },
     // Effect discipline (oxlint-plugin-effect). The whole codebase runs on
     // Effect v4, so the plugin's judgment applies everywhere: errors go in
