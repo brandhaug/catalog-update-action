@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.12](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.11...catalog-update-action-v1.0.12) (2026-10-20)
+
+
+### Miscellaneous
+
+* **deps:** group coupled catalog updates ([#77](https://github.com/brandhaug/catalog-update-action/issues/77)) ([24e2830](https://github.com/brandhaug/catalog-update-action/commit/24e283025e5bb00269af75ac571c4be06383c7ea))
+
 ## [1.0.11](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.10...catalog-update-action-v1.0.11) (2026-10-20)
 
 
