@@ -1,17 +1,19 @@
 {
-  "branchPrefix": "catalog-update",
-  "defaultBranch": "master",
-  "maxOpenPrs": 20,
-  "concurrency": 10,
-  "groups": [
-    { "name": "react", "patterns": ["react", "react-dom"] },
-    { "name": "vite", "patterns": ["vite", "vitest", "@vitejs/*", "@vitest/*"] },
-    { "name": "all-patch-updates", "patterns": ["*"], "updateTypes": ["patch"] }
-  ],
-  "ignore": [],
-  "minReleaseAgeDays": 3,
-  "autoMerge": {
-    "enabled": true,
-    "mergeMethod": "squash"
-  }
+	"branchPrefix": "catalog-update",
+	"defaultBranch": "master",
+	"maxOpenPrs": 20,
+	"concurrency": 10,
+	"groups": [
+		{
+			"name": "oxc",
+			"patterns": ["oxlint", "oxlint-*", "@oxlint/*", "oxfmt"]
+		},
+		{ "name": "all-patch-updates", "patterns": ["*"], "updateTypes": ["patch"] }
+	],
+	"ignore": [],
+	"minReleaseAgeDays": 3,
+	"autoMerge": {
+		"enabled": true,
+		"mergeMethod": "squash"
+	}
 }
