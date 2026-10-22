@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.13](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.12...catalog-update-action-v1.0.13) (2026-10-22)
+
+
+### Miscellaneous
+
+* **tooling:** upgrade Bun to 1.4.4 ([#79](https://github.com/brandhaug/catalog-update-action/issues/79)) ([2fc9c91](https://github.com/brandhaug/catalog-update-action/commit/2fc9c91e029197ff611e8ead3db873222835165c))
+
 ## [1.0.12](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.11...catalog-update-action-v1.0.12) (2026-10-20)
 
 
