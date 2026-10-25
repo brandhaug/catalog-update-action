@@ -134,7 +134,7 @@ export function escapeMentions(body: string): string {
 		.map((segment) =>
 			segment.code
 				? segment.text
-				: segment.text.replace(MENTION_PATTERN, '$1@<!---->$2')
+				: segment.text.replaceAll(MENTION_PATTERN, '$1@<!---->$2')
 		)
 		.join('')
 }
