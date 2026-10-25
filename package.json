@@ -1,6 +1,6 @@
 {
   "name": "catalog-update-action",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "Automated dependency updates for catalog: protocol monorepos (Bun, pnpm, Yarn)",
   "license": "MIT",
   "author": "brandhaug",
