@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.15](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.14...catalog-update-action-v1.0.15) (2026-11-12)
+
+
+### Miscellaneous
+
+* **deps:** bump all-patch-updates dependencies ([#83](https://github.com/brandhaug/catalog-update-action/issues/83)) ([029305f](https://github.com/brandhaug/catalog-update-action/commit/029305fe74001d3e1ee46c827ed9b2a2e15cedac))
+* **deps:** bump oxc dependencies ([#85](https://github.com/brandhaug/catalog-update-action/issues/85)) ([73ed218](https://github.com/brandhaug/catalog-update-action/commit/73ed2189f5127d64f236dd14c3ca6547a0f88fc6))
+* **deps:** bump oxc dependencies ([#86](https://github.com/brandhaug/catalog-update-action/issues/86)) ([a176db5](https://github.com/brandhaug/catalog-update-action/commit/a176db594cf7eda0356c1b21c9f4737b1c4a407c))
+* **deps:** bump oxc dependencies ([#87](https://github.com/brandhaug/catalog-update-action/issues/87)) ([f1fb0c7](https://github.com/brandhaug/catalog-update-action/commit/f1fb0c7f989659131955e18cbb97b603a35a66ae))
+* **deps:** bump oxc dependencies ([#88](https://github.com/brandhaug/catalog-update-action/issues/88)) ([9931eb2](https://github.com/brandhaug/catalog-update-action/commit/9931eb297b52cbf6d4417c6b7691b4ee73730c8d))
+
 ## [1.0.14](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.13...catalog-update-action-v1.0.14) (2026-10-25)
 
 
