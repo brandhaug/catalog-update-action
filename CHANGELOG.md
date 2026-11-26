@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.16](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.15...catalog-update-action-v1.0.16) (2026-11-26)
+
+
+### Miscellaneous
+
+* **deps:** bump oxc dependencies ([#93](https://github.com/brandhaug/catalog-update-action/issues/93)) ([45277a3](https://github.com/brandhaug/catalog-update-action/commit/45277a3ae2de24a7a048eddd8211fa5c9a0c8013))
+
 ## [1.0.15](https://github.com/brandhaug/catalog-update-action/compare/catalog-update-action-v1.0.14...catalog-update-action-v1.0.15) (2026-11-24)
 
 
